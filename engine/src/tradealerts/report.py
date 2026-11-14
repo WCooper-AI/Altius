@@ -66,8 +66,9 @@ def warnings_for(res: BacktestResult) -> list[str]:
         out.append(
             f"Only {n} trades. That's too few to tell skill from luck; test on more data or markets."
         )
-    if res.skipped:
-        out.append(f"{len(res.skipped)} signal(s) were skipped (e.g. position size rounded to zero).")
+    unplaced = [e for e in res.skipped if not e.data.get("limit")]  # loss-limit skips have their own note
+    if unplaced:
+        out.append(f"{len(unplaced)} signal(s) were skipped (e.g. position size rounded to zero).")
     out.extend(getattr(res, "notes", []) or [])
     if not res.strategy.funding_pct and res.metrics.get("avg_bars_held", 0) and res.metrics["trades"]:
         out.append("Overnight funding is set to 0%. Brokers charge it on positions held overnight; "

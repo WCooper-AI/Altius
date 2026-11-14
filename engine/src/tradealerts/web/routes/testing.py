@@ -65,6 +65,19 @@ def count_signals(request: Request, body: dict = Body(...), ws: Workspace = Depe
 SOURCE_NAMES = {"dukascopy": "Dukascopy", "yahoo": "Yahoo Finance", "oanda": "OANDA", "csv": "CSV file"}
 
 
+def price_basis(source: str, used_data_spread: bool | None, use_data_spread: bool) -> str:
+    """Where the fill prices and the spread came from, in one plain sentence."""
+    if used_data_spread:
+        return "Mid prices from bid and ask candles; each fill pays that candle's own spread"
+    if not use_data_spread:
+        return "Mid prices with the fixed spread you set (the data's own spread is switched off)"
+    if source == "yahoo":
+        return "Yahoo Finance prices have no bid or ask, so they are treated as mid prices with the fixed spread added"
+    if source == "csv":
+        return "Your file has no spread column, so its prices are treated as mid prices with the fixed spread added"
+    return "This price data came without bid and ask prices, so the fixed spread is added"
+
+
 def stamp(ws: Workspace, s, body: dict, metrics: dict, out: dict | None = None) -> dict:
     """Everything needed to run the same backtest again and get the same answer.
     ``out`` (the backtest's own result) adds the data fingerprint and data checks."""
@@ -93,13 +106,18 @@ def stamp(ws: Workspace, s, body: dict, metrics: dict, out: dict | None = None) 
         "funding_pct": s.funding_pct,
         "slippage": s.slippage,
         "slippage_pct": s.slippage_pct,
+        "slippage_atr_pct": s.slippage_atr_pct,
+        "prices": price_basis(source, metrics.get("used_data_spread"), s.use_data_spread),
         "commission": s.commission,
         "commission_pct": s.commission_pct,
         "borrow_pct": s.borrow_pct,
         "direction": s.direction,
         "risk": {"account_size": r.account_size, "risk_per_trade_pct": r.risk_per_trade_pct,
                  "point_value": r.point_value, "size_step": r.size_step, "min_size": r.min_size,
-                 "max_size": r.max_size, "compound": r.compound, "currency": r.currency},
+                 "max_size": r.max_size, "compound": r.compound, "currency": r.currency,
+                 "max_daily_loss_pct": r.max_daily_loss_pct, "max_weekly_loss_pct": r.max_weekly_loss_pct,
+                 "max_drawdown_pct": r.max_drawdown_pct},
+        "blocked_by_limits": metrics.get("blocked_by_limits"),
         "split_pct": metrics.get("split_pct"),
         "used_finer_candles": metrics.get("used_finer_candles"),
         "random_seed": analysis.SEED,
@@ -262,10 +280,21 @@ def _portfolio_options(body: dict, ids: list[str]) -> dict:
         max_open_risk_pct = float(max_open_risk_pct)
     else:
         max_open_risk_pct = None
-    if not shared and (max_open_trades is not None or max_open_risk_pct is not None):
+    loss = {}
+    for key, label in (("max_daily_loss_pct", "Daily loss limit"), ("max_weekly_loss_pct", "Weekly loss limit"),
+                       ("max_drawdown_pct", "Drawdown limit")):
+        v = body.get(key)
+        if v in (None, ""):
+            loss[key] = None
+            continue
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v <= 100:
+            err(422, f"{label} must be a % above 0 and up to 100")
+        loss[key] = float(v)
+    if not shared and (max_open_trades is not None or max_open_risk_pct is not None
+                       or any(v is not None for v in loss.values())):
         err(422, "The caps only apply when the strategies share one account")
     return {"weighting": weighting, "weights": weights, "shared": shared,
-            "max_open_trades": max_open_trades, "max_open_risk_pct": max_open_risk_pct}
+            "max_open_trades": max_open_trades, "max_open_risk_pct": max_open_risk_pct, **loss}
 
 
 # --------------------------------------------------------------------------- optimiser

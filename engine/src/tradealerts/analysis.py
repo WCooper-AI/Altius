@@ -345,15 +345,19 @@ def _exposure(per: list[dict], aligned: pd.DataFrame, open_events: list[tuple], 
 
 def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
                    weights: dict[str, float] | None = None, max_open_trades: int | None = None,
-                   max_open_risk_pct: float | None = None) -> dict:
+                   max_open_risk_pct: float | None = None, max_daily_loss_pct: float | None = None,
+                   max_weekly_loss_pct: float | None = None, max_drawdown_pct: float | None = None) -> dict:
     """Replay every strategy's trades through one account, in the order they were entered.
 
     Unlike :func:`portfolio`, the balance compounds: each trade is sized from the account as it
     stood when the trade opened (its strategy's risk % times its share, see ``weights``), and a
     trade is skipped when it would take the account past ``max_open_trades`` open at once or past
-    ``max_open_risk_pct`` of the balance at risk to the stops. Each trade's result scales with
-    its new size against the backtest's size; a trade the backtest sized at 0 stays at 0.
+    ``max_open_risk_pct`` of the balance at risk to the stops, or while a loss limit is reached
+    (``max_daily_loss_pct`` / ``max_weekly_loss_pct`` / ``max_drawdown_pct``, days and weeks in
+    UTC, see :mod:`limits`). Each trade's result scales with its new size against the backtest's
+    size; a trade the backtest sized at 0 stays at 0.
     """
+    from . import limits
     from .risk import position_size
 
     n = len(parts)
@@ -374,13 +378,18 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
                  "taken": 0, "skipped": 0, "pnl": 0.0, "win_rate_pct": None,
                  "direction": res.strategy.direction, "timeframe": res.strategy.market.timeframe,
                  "weight_pct": (weights[sid] if weights else 1.0 / n) * 100} for sid, name, res in parts}
-    skipped = {"open_trades": 0, "open_risk": 0, "too_small": 0}
+    skipped = {"open_trades": 0, "open_risk": 0, "too_small": 0, "daily_loss": 0, "weekly_loss": 0, "drawdown": 0}
+    caps = (max_daily_loss_pct, max_weekly_loss_pct, max_drawdown_pct)
+    limited = any(x is not None for x in caps)
+    track: dict = {}
 
     def close_until(t):
         nonlocal equity
         open_.sort(key=lambda x: x["exit"])
         while open_ and open_[0]["exit"] <= t:
             tr = open_.pop(0)
+            if limited:
+                limits.roll(track, tr["exit"], equity)
             equity += tr["pnl"]
             per[tr["sid"]]["pnl"] += tr["pnl"]
             eq_points.append((tr["exit"], equity))
@@ -390,6 +399,11 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
     for tr in rows:
         close_until(tr["entry"])
         p = per[tr["sid"]]
+        why = limits.blocked(track, tr["entry"], equity, "UTC", *caps) if limited else None
+        if why:
+            p["skipped"] += 1
+            skipped[why] += 1
+            continue
         if max_open_trades is not None and len(open_) >= max_open_trades:
             p["skipped"] += 1
             skipped["open_trades"] += 1
