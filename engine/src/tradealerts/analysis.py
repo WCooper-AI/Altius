@@ -766,17 +766,20 @@ def why_no_trades(strategy: Strategy, df: pd.DataFrame, start: pd.Timestamp | No
 # --------------------------------------------------------------------------- live vs backtest, trade by trade
 
 WINDOW_METRICS = ("win_rate_pct", "profit_factor", "avg_r", "max_drawdown_pct", "trades_per_month",
-                  "gross_pnl", "spread_cost", "funding")
+                  "gross_pnl", "spread_cost", "slippage_cost", "commission", "financing")
+COST_COLS = ("spread_cost", "slippage_cost", "commission", "financing")
 FEW_TRADES = 20
 
 
 def trades_frame(rows: list[dict]) -> pd.DataFrame:
     """Closed trades (backtest or paper) as a frame with the columns the window metrics need."""
-    cols = ["entry_time", "exit_time", "pnl", "r_multiple", "spread_cost", "funding"]
+    cols = ["entry_time", "exit_time", "pnl", "r_multiple", "funding", "borrow", *COST_COLS]
     df = pd.DataFrame(rows, columns=cols) if not isinstance(rows, pd.DataFrame) else rows.reindex(columns=cols)
     df = df.dropna(subset=["pnl"]).copy()
-    for c in ("pnl", "r_multiple", "spread_cost", "funding"):
-        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    for c in cols[2:]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["financing"] = df["financing"].fillna(df["funding"].fillna(0.0) + df["borrow"].fillna(0.0))
+    df[cols[2:]] = df[cols[2:]].fillna(0.0)
     for c in ("entry_time", "exit_time"):
         df[c] = pd.to_datetime(df[c], utc=True, errors="coerce")
     return df.reset_index(drop=True)
@@ -785,7 +788,7 @@ def trades_frame(rows: list[dict]) -> pd.DataFrame:
 def window_metrics(trades: pd.DataFrame, start_equity: float) -> dict | None:
     """The facts about one stretch of trades: how often it won, profit factor, average R,
     the worst drop (as % of the starting balance), trades a month, and the gross P&L
-    with what spread and funding took out of it."""
+    with what each cost took out of it (gross minus the costs is the net P&L)."""
     if trades is None or len(trades) == 0:
         return None
     pnl = trades["pnl"].to_numpy(dtype=float)
@@ -795,7 +798,7 @@ def window_metrics(trades: pd.DataFrame, start_equity: float) -> dict | None:
     dd = float(np.max((peak - eq) / peak * 100)) if start_equity > 0 else 0.0
     t0, t1 = trades["entry_time"].min(), trades["exit_time"].max()
     months = max((t1 - t0) / pd.Timedelta(days=30.4375), 1 / 30.4375) if pd.notna(t0) and pd.notna(t1) else None
-    gross = float(pnl.sum() + trades["spread_cost"].sum() + trades["funding"].sum())
+    costs = {c: float(trades[c].sum()) for c in COST_COLS}
     return {
         "trades": int(len(pnl)),
         "win_rate_pct": float((pnl > 0).mean() * 100),
@@ -803,9 +806,8 @@ def window_metrics(trades: pd.DataFrame, start_equity: float) -> dict | None:
         "avg_r": float(trades["r_multiple"].mean()),
         "max_drawdown_pct": dd,
         "trades_per_month": float(len(pnl) / months) if months else None,
-        "gross_pnl": gross,
-        "spread_cost": float(trades["spread_cost"].sum()),
-        "funding": float(trades["funding"].sum()),
+        "gross_pnl": float(pnl.sum()) + sum(costs.values()),
+        **costs,
         "net_pnl": float(pnl.sum()),
     }
 

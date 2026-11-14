@@ -47,6 +47,9 @@ def summary_rows(res: BacktestResult) -> list[tuple[str, str]]:
              + (" (from the data's bid/ask)" if m.get("used_data_spread") else "")),
             ("Overnight funding paid", _money(m.get("total_funding", 0.0), sym)),
         ]
+        rows += [(label, _money(m[key], sym)) for key, label in (
+            ("total_borrow", "Borrow fee paid (shorts)"), ("total_commission", "Commission paid"),
+            ("total_slippage", "Slippage paid")) if m.get(key)]
     return rows
 
 

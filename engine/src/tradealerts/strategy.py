@@ -179,7 +179,7 @@ class Strategy:
         """Stop and target prices for a trade entered at ``entry_price``."""
         s = self.sign
         stop = self._level(self.stop_spec, "stop", entry_price, refs, -s)
-        if stop is None or (stop - entry_price) * s >= 0:
+        if stop is None or not math.isfinite(stop) or (stop - entry_price) * s >= 0:
             raise SkipTrade("stop is missing or on the wrong side of the entry price")
         target = None
         if self.target_spec:
@@ -187,7 +187,7 @@ class Strategy:
                 target = entry_price + s * float(self.target_spec["r_multiple"]) * abs(entry_price - stop)
             else:
                 target = self._level(self.target_spec, "target", entry_price, refs, s)
-            if target is None or (target - entry_price) * s <= 0:
+            if target is None or not math.isfinite(target) or (target - entry_price) * s <= 0:
                 raise SkipTrade("target is missing or on the wrong side of the entry price")
         return stop, target
 

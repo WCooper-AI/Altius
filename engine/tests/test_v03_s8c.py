@@ -147,10 +147,12 @@ def test_borrow_fee_only_for_shorts():
     nights = nights_between(short_t["entry_time"], short_t["exit_time"])
     assert nights >= 2
     assert short_t["borrow"] == pytest.approx(nights * 100 * short_t["size"] * 3.65 / 100 / 365)
-    assert short_t["funding"] == pytest.approx(short_t["borrow"])  # no base funding set
+    assert short_t["funding"] == 0  # no base funding set
+    assert short_t["financing"] == pytest.approx(short_t["borrow"])
     both = run("short", borrow_pct=3.65, funding_pct=3.65)
-    assert both["funding"] == pytest.approx(2 * short_t["borrow"])
+    assert both["funding"] == pytest.approx(short_t["borrow"])
     assert both["borrow"] == pytest.approx(short_t["borrow"])
+    assert both["financing"] == pytest.approx(2 * short_t["borrow"])
 
 
 def test_cost_keys_validated():

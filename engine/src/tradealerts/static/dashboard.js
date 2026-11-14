@@ -419,7 +419,9 @@ const WINDOW_ROWS = [
   ["max_drawdown_pct", "Worst drop", (v) => num(v, 1) + "%"],
   ["trades_per_month", "Trades a month", (v) => num(v, 1)],
 ];
-const COST_ROWS = [["gross_pnl", "Gross P/L"], ["spread_cost", "Spread cost"], ["funding", "Funding cost"]];
+const COST_ROWS = [["gross_pnl", "Gross P/L"], ["spread_cost", "Spread cost"], ["slippage_cost", "Slippage"],
+  ["commission", "Commission"], ["financing", "Overnight charges"]];
+const hasAmount = (m) => !!m && !!(m.live || m.low || m.high);
 const POSITION_TEXT = { below: "below the usual range", within: "within the usual range", above: "above the usual range" };
 
 function windowTable(r, w) {
@@ -449,9 +451,11 @@ function windowTable(r, w) {
       h("tbody", {}, WINDOW_ROWS.map(([k, l, f]) => row(k, l, f))))),
     h("h3", {}, "Where the money went"),
     h("div", { class: "table-wrap" }, h("table", { class: "compare-table" }, head,
-      h("tbody", {}, COST_ROWS.map(([k, l]) => row(k, l, money2))))),
+      h("tbody", {}, COST_ROWS.filter(([k]) => k === "gross_pnl" || hasAmount(w.metrics[k]))
+        .map(([k, l]) => row(k, l, money2))))),
     h("p", { class: "small muted" }, `Each range is from ${w.backtest_trades} backtest trades, resampled into stretches of ${w.window} in a row. ` +
-      "Gross P/L is before spread and funding; net is what the balance shows."),
+      "Gross P/L is before the costs listed; net is what the balance shows. Overnight charges are funding plus, " +
+      "for short stock positions, the borrow fee."),
   ]);
   return box;
 }

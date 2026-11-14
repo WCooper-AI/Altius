@@ -113,6 +113,14 @@ function settingsForm(recipe, st, onChange) {
 }
 
 /** Backtest results written as sentences, with the detail tucked away. */
+// "£12 in spreads, £3 in commission and £5 in overnight funding": spreads always, other costs when charged.
+function costSentence(m, sym) {
+  const parts = [[m.total_spread_cost || 0, "spreads"], [m.total_slippage, "slippage"], [m.total_commission, "commission"],
+    [m.total_funding, "overnight funding"], [m.total_borrow, "borrow fees"]]
+    .filter(([v], i) => i === 0 || v).map(([v, what]) => `${money(v, sym)} in ${what}`);
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
+}
+
 function plainResults(res) {
   const m = res.metrics;
   const sym = res.currency;
@@ -127,8 +135,7 @@ function plainResults(res) {
     h("p", { class: "result-lede" }, `${money(m.start_equity, sym)} would have become `,
       h("strong", { class: ret >= 0 ? "gain" : "loss" }, `${money(m.end_equity, sym)} (${signed(ret, "%")})`),
       `. Simply holding the market over the same time: ${signed(m.buy_and_hold_pct, "%")}.`),
-    n ? h("p", { class: "muted" }, `That's after ${money(m.total_spread_cost || 0, sym)} in spreads` +
-      (m.total_funding ? ` and ${money(m.total_funding, sym)} in overnight funding` : "") + ", the costs a broker would charge.") : null,
+    n ? h("p", { class: "muted" }, `That's after ${costSentence(m, sym)}, the costs a broker would charge.`) : null,
     h("p", { class: "muted" }, n
       ? `At its lowest point the balance was ${num(Math.abs(m.max_drawdown_pct), 1)}% below its previous high. The longest run of losing trades was ${m.longest_losing_streak}.`
       : "The rules never triggered on this data. Try a smaller move, a different market or checking more often."),
