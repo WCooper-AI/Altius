@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from . import timeframes
+from . import limits, timeframes
 from .data import find_jumps
 from .markethours import trades_24_7
 from .simulator import Event, Simulator
@@ -44,6 +44,11 @@ def fine_lookup(fine: pd.DataFrame | None, bar: pd.Timedelta):
         return fine.iloc[a:b]
 
     return rows
+
+
+def _limit_skips(skipped: list) -> int:
+    """How many entries the loss limits stopped."""
+    return sum(1 for e in skipped if e.data.get("limit"))
 
 
 def spreads_for(strategy: Strategy, df: pd.DataFrame) -> np.ndarray | None:
@@ -141,6 +146,7 @@ def run_backtest(strategy: Strategy, df: pd.DataFrame, fine: pd.DataFrame | None
     period = df.iloc[first:cut]
     metrics = compute_metrics(strategy, trades_df, eq, period, in_market)
     metrics["warmup_candles"] = first
+    metrics["blocked_by_limits"] = _limit_skips(skipped)
     metrics["used_data_spread"] = spreads is not None
     metrics["used_finer_candles"] = fine is not None and not fine.empty
     split = {}
@@ -148,12 +154,16 @@ def run_backtest(strategy: Strategy, df: pd.DataFrame, fine: pd.DataFrame | None
         oos_trades, oos_skipped, oos_eq, oos_in = _simulate(strategy, df, prepared, cut, len(df), get_fine, spreads)
         skipped += oos_skipped
         oos_metrics = compute_metrics(strategy, oos_trades, oos_eq, df.iloc[cut:], oos_in)
+        oos_metrics["blocked_by_limits"] = _limit_skips(oos_skipped)
         split = {"oos_trades": oos_trades, "oos_equity": oos_eq, "oos_metrics": oos_metrics,
                  "split_date": df.index[cut]}
         metrics["split_pct"] = float(split_pct)
         oos_metrics["split_pct"] = float(split_pct)
 
     all_notes = list(notes or [])
+    limit_note = limits.note([(e.time, e.data["limit"]) for e in skipped if e.data.get("limit")])
+    if limit_note:
+        all_notes.append(limit_note)
     need = strategy.lookback_candles
     if start is not None and first < need:
         all_notes.append(

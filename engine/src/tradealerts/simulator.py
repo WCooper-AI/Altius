@@ -19,10 +19,14 @@ How trades are filled, modelled on a CFD/spread-bet broker:
   reports them apart as ``funding`` and ``borrow``; ``financing`` is the two together.
 * ``costs.commission`` (money) and ``costs.commission_pct`` (% of the fill's value)
   are charged on the entry fill and again on the exit fill.
-* ``costs.slippage`` (price points) and ``costs.slippage_pct`` (% of the fill price)
-  move every market fill against you on top of the spread: entries, stops, exit
-  rules, time limits and the end-of-data close. Targets are limit orders, filled
-  at their price or better, so they get none. Reported per trade as ``slippage_cost``.
+* ``costs.slippage`` (price points), ``costs.slippage_pct`` (% of the fill price) and
+  ``costs.slippage_atr_pct`` (% of the 14-candle ATR known at the candle's open, so it
+  grows when the market is busy) move every market fill against you on top of the
+  spread: entries, stops, exit rules, time limits and the end-of-data close. Targets are
+  limit orders, filled at their price or better, so they get none. Reported per trade as
+  ``slippage_cost``.
+* ``risk.max_daily_loss_pct``, ``risk.max_weekly_loss_pct`` and ``risk.max_drawdown_pct``
+  stop new entries (a ``skipped`` event with ``limit`` set) as described in :mod:`limits`.
 
 State is a plain dict so live runs can save it to disk between checks.
 """
@@ -35,7 +39,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from . import timeframes
+from . import limits, timeframes
 from .risk import position_size
 from .strategy import SkipTrade, Strategy
 
@@ -88,6 +92,9 @@ class Simulator:
         self.s = strategy
         self.state = upgrade_state(state) if state is not None else new_state(strategy)
         self.bar = timeframes.to_timedelta(strategy.market.timeframe)
+        r = strategy.risk
+        self._limits = (r.max_daily_loss_pct, r.max_weekly_loss_pct, r.max_drawdown_pct)
+        self._limited = any(x is not None for x in self._limits)
 
     # ------------------------------------------------------------------ helpers
 
@@ -129,7 +136,16 @@ class Simulator:
 
     def _slip(self, price: float) -> float:
         """Price points lost to slippage on one market fill at ``price``."""
-        return self.s.slippage + abs(price) * self.s.slippage_pct / 100
+        atr = self.state.get("slip_atr") if self.s.slippage_atr_pct else None
+        vol = atr * self.s.slippage_atr_pct / 100 if atr and math.isfinite(atr) else 0.0
+        return self.s.slippage + abs(price) * self.s.slippage_pct / 100 + vol
+
+    def _blocked(self, time) -> str | None:
+        """Which loss limit, if any, stops a trade opening at ``time``."""
+        if not self._limited:
+            return None
+        return limits.blocked(self.state.setdefault("limits", {}), time, self.state["equity"],
+                              self.s.market.tz, *self._limits)
 
     def _accrue_funding(self, until, price: float) -> None:
         """Take overnight funding, and the borrow fee when short, for each 22:00 UTC passed."""
@@ -283,6 +299,10 @@ class Simulator:
         st["half_spread"] = hs
         self._values = values or {}
         events: list[Event] = []
+        if s.slippage_atr_pct:
+            st["slip_atr"] = refs.get("slip_atr")
+        if self._limited:  # start a new day or week from the balance it opened with
+            limits.roll(st.setdefault("limits", {}), time, st["equity"], s.market.tz)
 
         # 0. funding for nights since the last candle, up to this open
         if st["position"]:
@@ -295,6 +315,10 @@ class Simulator:
         # 2. entry signal from the previous candle -> in at this open
         pend = st["pending_entry"]
         st["pending_entry"] = None
+        why = self._blocked(time) if pend and not st["position"] else None
+        if why:
+            events.append(Event("skipped", time, {"reason": limits.REASONS[why], "limit": why}))
+            pend = None
         if pend and not st["position"]:
             slip = self._slip(o + sign * hs)
             fill = o + sign * (hs + slip)

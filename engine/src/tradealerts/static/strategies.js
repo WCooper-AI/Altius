@@ -278,8 +278,9 @@ async function viewEditor(id, exampleName, preloaded, run) {
     const d = clone(data);
     if (d.exit && d.exit.when && !groupItems(d.exit.when).length) delete d.exit.when;
     if (d.exit && (d.exit.max_bars === null || d.exit.max_bars === undefined)) delete d.exit.max_bars;
-    for (const k of ["max_size", "point_value", "size_step", "min_size"]) if (d.risk && isBlank(d.risk[k])) delete d.risk[k];
-    for (const k of ["spread", "funding_pct", "slippage", "slippage_pct"]) if (d.costs && isBlank(d.costs[k])) delete d.costs[k];
+    for (const k of ["max_size", "point_value", "size_step", "min_size", "max_daily_loss_pct", "max_weekly_loss_pct", "max_drawdown_pct"])
+      if (d.risk && isBlank(d.risk[k])) delete d.risk[k];
+    for (const k of ["spread", "funding_pct", "slippage", "slippage_pct", "slippage_atr_pct"]) if (d.costs && isBlank(d.costs[k])) delete d.costs[k];
     if (d.exit && d.exit.target === null) delete d.exit.target;
     if (d.market && !d.market.lookback_days) delete d.market.lookback_days;
     if (!d.description) delete d.description;
@@ -701,6 +702,10 @@ const RISK_HELP = {
   spread: "The gap between the buy and sell price, in price points, which you pay on every trade. It's only used when the price data doesn't include it (Dukascopy and OANDA do). Your broker's market info page shows it; it's usually wider overnight and around news.",
   slippage: "Market orders (entries, stop losses, exit rules) often fill a little worse than the price you saw, especially in fast markets. This many price points are taken off every such fill, on top of the spread. Targets are limit orders and get none. Blank means none.",
   slippage_pct: "The same as slippage in points, but as a percentage of the fill price, which suits markets whose price varies a lot over time. Can be combined with points. Blank means none.",
+  slippage_atr_pct: "Slippage that grows when the market is moving fast. This percentage of the average candle range (the 14-candle ATR, as it stood when the candle opened) is taken off every entry, stop and exit fill, so busy markets cost more than quiet ones. Adds to the other slippage settings. Blank means none.",
+  max_daily_loss_pct: "Once the balance has fallen this much since the start of the day, no new trades open until the next day. Trades already open carry on. A loss counts on the day the trade closes. Days follow the market's time zone. Blank means no limit.",
+  max_weekly_loss_pct: "The same as the daily limit, but over a week (Monday to Sunday). Blank means no limit.",
+  max_drawdown_pct: "Once the balance is this much below its highest point so far, no new trades open for the rest of the backtest or forward test. Trades already open carry on. Blank means no limit.",
   funding_pct: "The yearly interest your broker charges for holding a CFD past its daily cut-off (around 10pm UK time). Brokers publish it as a daily or yearly rate: enter the yearly percentage. Blank uses the built-in market's typical rate.",
   priority: "How phone alerts arrive in ntfy. High and urgent can sound even when the phone is on Do Not Disturb (depending on your phone's settings).",
   compound: "On: trade sizes grow and shrink with the balance, like a real account. Off: every trade is sized from the starting balance, which makes results from different periods easier to compare.",
@@ -761,6 +766,10 @@ function riskSection(data, changed) {
       f("Overnight funding (% a year)", "funding_pct", { step: "0.1", min: "0", allowEmpty: true }, c, "Charged for each night a trade is open. Blank: the built-in market's typical rate, otherwise none"),
       f("Slippage (points)", "slippage", { step: "any", min: "0", allowEmpty: true }, c, "Lost on each entry, stop and exit fill. Blank: none"),
       f("Slippage (% of price)", "slippage_pct", { step: "0.01", min: "0", allowEmpty: true }, c, "Lost on each entry, stop and exit fill. Blank: none"),
+      f("Slippage (% of average range)", "slippage_atr_pct", { step: "any", min: "0", allowEmpty: true }, c, "Grows when the market is busy. Blank: none"),
+      f("Daily loss limit (%)", "max_daily_loss_pct", { step: "any", min: "0", allowEmpty: true }, r, "No new trades for the rest of the day. Blank: no limit"),
+      f("Weekly loss limit (%)", "max_weekly_loss_pct", { step: "any", min: "0", allowEmpty: true }, r, "No new trades for the rest of the week. Blank: no limit"),
+      f("Drawdown limit (%)", "max_drawdown_pct", { step: "any", min: "0", allowEmpty: true }, r, "No new trades after falling this far from the high. Blank: no limit"),
       h("div", { class: "field" }, h("label", {}, "Alert priority", infoTip(RISK_HELP.priority)), prio)),
     h("div", { class: "inline", style: null },
       h("label", { class: "check" }, h("input", { type: "checkbox", checked: r.compound !== false,

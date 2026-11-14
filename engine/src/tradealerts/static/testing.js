@@ -950,6 +950,15 @@ function renderWhyNoTrades(why) {
     h("p", { class: "small" }, lede, " The counts show how often each part held on its own."), list);
 }
 
+/** The loss limits that were set, and how many entries they stopped. */
+function lossLimits(r, blocked) {
+  const set = [r.max_daily_loss_pct != null ? `${short(r.max_daily_loss_pct)}% a day` : "",
+    r.max_weekly_loss_pct != null ? `${short(r.max_weekly_loss_pct)}% a week` : "",
+    r.max_drawdown_pct != null ? `${short(r.max_drawdown_pct)}% from the high` : ""].filter(Boolean);
+  if (!set.length) return "None";
+  return `${set.join(", ")}; ${blocked || 0} trade${blocked === 1 ? "" : "s"} stopped from opening`;
+}
+
 /** What exactly was tested, so the same backtest can be run again and compared. */
 function testStamp(meta, sym, quality) {
   const rules = meta.version ? `Version ${meta.version} of this strategy` : "Unsaved changes (not a saved version)";
@@ -959,19 +968,20 @@ function testStamp(meta, sym, quality) {
   const rows = [
     ["Rules", h("span", {}, rules, " ", h("span", { class: "muted" }, `(fingerprint ${meta.rules_hash})`))],
     ["Market", `${meta.market} (${meta.symbol})`],
-    ["Price data", meta.source],
+    ["Price data", meta.prices ? `${meta.source}. ${meta.prices}` : meta.source],
     ["Candle size", meta.timeframe],
     ["Period", `${day(meta.start)} to ${day(meta.end)}`],
     ["Warm-up before the period", meta.warmup_candles ? `${meta.warmup_candles} candles` : "None (the data starts here)"],
     ["Spread", spread],
     ["Overnight funding", meta.funding_pct ? `${short(meta.funding_pct)}% a year` : "None"],
-    ["Slippage per fill", [meta.slippage ? `${short(meta.slippage)} price points` : "", meta.slippage_pct ? `${short(meta.slippage_pct)}% of price` : ""]
-      .filter(Boolean).join(" + ") || "None"],
+    ["Slippage per fill", [meta.slippage ? `${short(meta.slippage)} price points` : "", meta.slippage_pct ? `${short(meta.slippage_pct)}% of price` : "",
+      meta.slippage_atr_pct ? `${short(meta.slippage_atr_pct)}% of the average candle range` : ""].filter(Boolean).join(" + ") || "None"],
     ["Commission per fill", [meta.commission ? money(meta.commission, sym) : "", meta.commission_pct ? `${short(meta.commission_pct)}% of value` : ""]
       .filter(Boolean).join(" + ") || "None"],
     ["Borrow fee (shorts)", meta.borrow_pct ? `${short(meta.borrow_pct)}% a year` : "None"],
     ...(meta.risk ? [["Sizing", `${money(r.account_size, sym)} account, ${short(r.risk_per_trade_pct)}% risk a trade, ` +
       `${short(r.point_value)} per point, steps of ${short(r.size_step)}${r.compound ? ", compounding" : ", fixed account size"}`]] : []),
+    ...(meta.risk ? [["Loss limits", lossLimits(r, meta.blocked_by_limits)]] : []),
     ...(meta.split_pct ? [["In-sample part", `First ${short(meta.split_pct)}% of the period`]] : []),
     ...(meta.data_fingerprint ? [["Price data fingerprint", `${meta.data_fingerprint} (${(meta.data_candles || 0).toLocaleString("en-GB")} candles, warm-up included)`]] : []),
     ...(quality ? [["Price data checks", issues.length ? h("ul", { class: "small" }, issues.map((i) => h("li", {}, i.text)))

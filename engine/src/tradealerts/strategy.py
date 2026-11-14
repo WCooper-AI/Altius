@@ -55,6 +55,9 @@ class Risk:
     max_size: float | None = None
     compound: bool = True
     currency: str = "GBP"
+    max_daily_loss_pct: float | None = None  # no new trades for the rest of a day that has lost this %
+    max_weekly_loss_pct: float | None = None  # ... of a week
+    max_drawdown_pct: float | None = None  # no new trades at all once the balance is this % below its high
 
     @property
     def symbol(self) -> str:
@@ -106,6 +109,7 @@ class Strategy:
     borrow_pct: float = 0.0  # yearly, short positions only, charged nightly like funding
     slippage: float = 0.0  # price points lost on each market fill, beyond the spread
     slippage_pct: float = 0.0  # % of the fill price lost on each market fill
+    slippage_atr_pct: float = 0.0  # % of the 14-candle ATR lost on each market fill (grows with volatility)
     template: bool = False
     enabled: bool = True
     alerts_enabled: bool = True
@@ -168,6 +172,9 @@ class Strategy:
                 refs[f"{name}_atr"] = ctx.indicator(
                     "atr", {"period": int(spec.get("atr_period", 14))}
                 ).to_numpy(dtype=float)
+        if self.slippage_atr_pct:
+            # the ATR known when each candle opens (up to the one before), for volatility slippage
+            refs["slip_atr"] = ctx.indicator("atr", {"period": 14}).shift(1).to_numpy(dtype=float)
         if self._stop_level:
             refs["stop_level"] = _to_array(self._stop_level(ctx), df)
         if self._target_level:
@@ -267,6 +274,14 @@ def _number(v, path, minimum=None, allow_none=False):
     return float(v)
 
 
+def _limit_pct(r: dict, key: str) -> float | None:
+    """A loss limit: blank for none, otherwise a % above 0 and up to 100."""
+    v = _number(r.get(key), f"risk.{key}", 0, allow_none=True)
+    if v is not None and not 0 < v <= 100:
+        raise StrategyError(f"risk.{key} must be a % above 0 and up to 100, or blank for no limit")
+    return v
+
+
 def _level_spec(spec, path, allow_r=False):
     if not isinstance(spec, dict):
         raise StrategyError(f"{path} must be a mapping like {{atr: 2}} or {{percent: 1}}")
@@ -356,7 +371,7 @@ def strategy_from_dict(data: dict, sid: str = "", path: Path | None = None, raw_
     _check_keys(
         r,
         {"account_size", "risk_per_trade_pct", "point_value", "size_step", "min_size", "max_size",
-         "compound", "currency"},
+         "compound", "currency", "max_daily_loss_pct", "max_weekly_loss_pct", "max_drawdown_pct"},
         "risk",
     )
     # Built-in markets know their own point value, typical spread and funding; a blank uses those.
@@ -378,13 +393,16 @@ def strategy_from_dict(data: dict, sid: str = "", path: Path | None = None, raw_
         max_size=_number(r.get("max_size"), "risk.max_size", 0, allow_none=True),
         compound=bool(r.get("compound", True)),
         currency=str(r.get("currency") or "GBP"),
+        max_daily_loss_pct=_limit_pct(r, "max_daily_loss_pct"),
+        max_weekly_loss_pct=_limit_pct(r, "max_weekly_loss_pct"),
+        max_drawdown_pct=_limit_pct(r, "max_drawdown_pct"),
     )
     if risk.risk_per_trade_pct > 10:
         raise StrategyError("risk.risk_per_trade_pct above 10% is almost certainly a typo")
 
     costs = data.get("costs") or {}
     _check_keys(costs, {"spread", "funding_pct", "use_data_spread", "commission", "commission_pct", "borrow_pct",
-                        "slippage", "slippage_pct"}, "costs")
+                        "slippage", "slippage_pct", "slippage_atr_pct"}, "costs")
     spread = _number(given(costs, "spread", builtin.get("spread", 0.0)), "costs.spread", 0)
     funding = _number(given(costs, "funding_pct", builtin.get("funding", 0.0)), "costs.funding_pct", 0)
     if funding > 100:
@@ -400,6 +418,9 @@ def strategy_from_dict(data: dict, sid: str = "", path: Path | None = None, raw_
     slippage_pct = _number(given(costs, "slippage_pct", builtin.get("slippage_pct", 0.0)), "costs.slippage_pct", 0)
     if slippage_pct > 5:
         raise StrategyError("costs.slippage_pct is a percentage of each fill's price; above 5 is almost certainly a typo")
+    slippage_atr = _number(given(costs, "slippage_atr_pct", 0.0), "costs.slippage_atr_pct", 0)
+    if slippage_atr > 100:
+        raise StrategyError("costs.slippage_atr_pct is a percentage of the average candle range; above 100 is almost certainly a typo")
 
     alerts = data.get("alerts") or {}
     _check_keys(alerts, {"enabled", "priority"}, "alerts")
@@ -424,6 +445,7 @@ def strategy_from_dict(data: dict, sid: str = "", path: Path | None = None, raw_
             borrow_pct=borrow,
             slippage=slippage,
             slippage_pct=slippage_pct,
+            slippage_atr_pct=slippage_atr,
             template=bool(data.get("template", False)),
             enabled=bool(data.get("enabled", True)),
             alerts_enabled=bool(alerts.get("enabled", True)),
