@@ -843,7 +843,7 @@ function renderBacktest(res) {
           return tr;
         })))))]);
   }
-  if (res.meta) box.appendChild(testStamp(res.meta, sym));
+  if (res.meta) box.appendChild(testStamp(res.meta, sym, res.data_quality));
   return box;
 }
 
@@ -951,9 +951,11 @@ function renderWhyNoTrades(why) {
 }
 
 /** What exactly was tested, so the same backtest can be run again and compared. */
-function testStamp(meta, sym) {
+function testStamp(meta, sym, quality) {
   const rules = meta.version ? `Version ${meta.version} of this strategy` : "Unsaved changes (not a saved version)";
   const spread = meta.used_data_spread ? "Real bid/ask from the price data" : `${short(meta.spread)} price points`;
+  const r = meta.risk || {};
+  const issues = (quality && quality.issues) || [];
   const rows = [
     ["Rules", h("span", {}, rules, " ", h("span", { class: "muted" }, `(fingerprint ${meta.rules_hash})`))],
     ["Market", `${meta.market} (${meta.symbol})`],
@@ -965,6 +967,15 @@ function testStamp(meta, sym) {
     ["Overnight funding", meta.funding_pct ? `${short(meta.funding_pct)}% a year` : "None"],
     ["Slippage per fill", [meta.slippage ? `${short(meta.slippage)} price points` : "", meta.slippage_pct ? `${short(meta.slippage_pct)}% of price` : ""]
       .filter(Boolean).join(" + ") || "None"],
+    ["Commission per fill", [meta.commission ? money(meta.commission, sym) : "", meta.commission_pct ? `${short(meta.commission_pct)}% of value` : ""]
+      .filter(Boolean).join(" + ") || "None"],
+    ["Borrow fee (shorts)", meta.borrow_pct ? `${short(meta.borrow_pct)}% a year` : "None"],
+    ...(meta.risk ? [["Sizing", `${money(r.account_size, sym)} account, ${short(r.risk_per_trade_pct)}% risk a trade, ` +
+      `${short(r.point_value)} per point, steps of ${short(r.size_step)}${r.compound ? ", compounding" : ", fixed account size"}`]] : []),
+    ...(meta.split_pct ? [["In-sample part", `First ${short(meta.split_pct)}% of the period`]] : []),
+    ...(meta.data_fingerprint ? [["Price data fingerprint", `${meta.data_fingerprint} (${(meta.data_candles || 0).toLocaleString("en-GB")} candles, warm-up included)`]] : []),
+    ...(quality ? [["Price data checks", issues.length ? h("ul", { class: "small" }, issues.map((i) => h("li", {}, i.text)))
+      : `Nothing unusual found in ${(quality.candles || 0).toLocaleString("en-GB")} candles`]] : []),
     ["Tested", `${when(meta.tested_at)}, Altius ${meta.engine_version}`],
   ];
   return h("details", { class: "chart stamp" }, h("summary", {}, "How this was tested"),

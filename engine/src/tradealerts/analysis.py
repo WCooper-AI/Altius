@@ -26,6 +26,7 @@ from .strategy import Strategy
 
 N_RESAMPLES = 5000
 N_SHUFFLES = 2000
+SEED = 0  # random draws (trade shuffles) start here, so the same backtest gives the same ranges
 MIN_TRADES = 30
 
 
@@ -553,7 +554,7 @@ def monte_carlo(trades: pd.DataFrame, start_equity: float, rng: np.random.Genera
     n = len(trades)
     if n < 2:
         return None
-    rng = rng or np.random.default_rng(0)
+    rng = rng or np.random.default_rng(SEED)
     pnl = trades["pnl"].to_numpy(dtype=float)
     perms = np.argsort(rng.random((runs, n)), axis=1)
     if compound:

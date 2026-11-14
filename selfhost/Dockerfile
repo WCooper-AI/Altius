@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /src
 COPY engine ./engine
-RUN pip install "./engine[yahoo]" \
+RUN pip install "./engine[yahoo,parquet]" \
     && useradd --create-home --uid 1000 trader \
     && mkdir /work && chown trader:trader /work
 

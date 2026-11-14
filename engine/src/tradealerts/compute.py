@@ -12,7 +12,7 @@ import math
 
 import pandas as pd
 
-from . import rules, analysis
+from . import rules, analysis, dataquality
 from .backtest import run_backtest
 from .report import warnings_for
 from .strategy import check_runtime, strategy_from_dict
@@ -163,6 +163,10 @@ def backtest(data: dict, df, fine, test_start, notes: list[str], split_pct: floa
         out["oos_equity"] = _points(res.oos_equity)
         out["oos_trade_count"] = len(res.oos_trades)
         out["split_date"] = res.split_date.isoformat()
+    # the tested period's data checks, and a fingerprint of every candle used (warm-up included)
+    out["data_quality"] = dataquality.report(period, s.market.timeframe, s.market.symbol)
+    out["data_fingerprint"] = dataquality.fingerprint(df)
+    out["data_candles"] = len(df)
     return _clean(out)
 
 

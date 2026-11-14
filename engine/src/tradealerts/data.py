@@ -13,6 +13,7 @@ hit first inside one candle.
 from __future__ import annotations
 
 import datetime as dt
+import importlib.util
 import json
 import time
 import urllib.error
@@ -24,9 +25,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from . import timeframes
+from . import dataquality, timeframes
 
 OHLCV = ["open", "high", "low", "close", "volume"]
+# Saved downloads are Parquet files when pyarrow is installed (``tradealerts[parquet]``):
+# smaller and much faster to load than the gzipped CSV used otherwise.
+PARQUET = importlib.util.find_spec("pyarrow") is not None
 
 # Where candles longer than an hour start. Most CFD and FX brokers start the
 # trading day at 17:00 New York time, so 4-hour and daily candles line up with
@@ -505,7 +509,7 @@ class DukascopyProvider(Provider):
         if not self.cache_dir:
             return None
         safe = "".join(ch if ch.isalnum() else "_" for ch in inst)
-        return self.cache_dir / f"dukascopy_{safe}_{interval}_{side}.csv.gz"
+        return self.cache_dir / f"dukascopy_{safe}_{interval}_{side}{'.parquet' if PARQUET else '.csv.gz'}"
 
     def _side(self, inst: str, interval: str, side: str, start: pd.Timestamp, now: pd.Timestamp) -> pd.DataFrame:
         path = self._cache_path(inst, interval, side)
@@ -516,6 +520,13 @@ class DukascopyProvider(Provider):
         with lock:
             meta_path = path.with_suffix(".json")
             cached, covered_from = self._read_cache(path, meta_path)
+            legacy = None
+            if cached is None and path.suffix == ".parquet":
+                # a cache saved as CSV before Parquet was available: read it once, then rewrite it
+                legacy = path.with_name(path.stem + ".csv.gz")
+                cached, covered_from = self._read_cache(legacy, legacy.with_suffix(".json"))
+                if cached is None:
+                    legacy = None
             parts, changed = [], False
             if cached is None or cached.empty:
                 parts.append(self._fetch_range(inst, interval, side, start, now))
@@ -540,21 +551,38 @@ class DukascopyProvider(Provider):
             df = pd.concat(parts) if len(parts) > 1 else parts[0]
             df = df[~df.index.duplicated(keep="last")].sort_index()
             df = df[df.index < now]
-            if changed and (cached is None or len(df) != len(cached) or not df.index.equals(cached.index)
-                            or not df.tail(3).equals(cached.tail(3))):
+            if legacy is not None or (changed and (cached is None or len(df) != len(cached)
+                                                    or not df.index.equals(cached.index)
+                                                    or not df.tail(3).equals(cached.tail(3)))):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 import os
                 import threading
                 # unique names: several processes may refresh the same shared cache at once
                 tag = f".{os.getpid()}.{threading.get_ident()}.tmp"
                 tmp = path.with_name(path.name + tag)
-                df.to_csv(tmp, compression="gzip")
+                if path.suffix == ".parquet":
+                    df.to_parquet(tmp)
+                else:
+                    df.to_csv(tmp, compression="gzip")
                 tmp.replace(path)
+                # each rewrite gets the next revision number and a fingerprint of its candles
+                meta = {"from": covered_from.isoformat(), "revision": self._revision(meta_path) + 1,
+                        "rows": len(df), "fingerprint": dataquality.fingerprint(df)}
                 meta_tmp = meta_path.with_name(meta_path.name + tag)
-                meta_tmp.write_text(json.dumps({"from": covered_from.isoformat()}))
+                meta_tmp.write_text(json.dumps(meta))
                 meta_tmp.replace(meta_path)
                 self._memo[str(path)] = (self._stamp(path), df, covered_from)
+                if legacy is not None:
+                    for old in (legacy, legacy.with_suffix(".json")):
+                        old.unlink(missing_ok=True)
             return df[df.index >= start]
+
+    @staticmethod
+    def _revision(meta_path: Path) -> int:
+        try:
+            return int(json.loads(meta_path.read_text()).get("revision", 0))
+        except (OSError, ValueError, AttributeError):
+            return 0
 
     @staticmethod
     def _stamp(path: Path):
@@ -571,7 +599,10 @@ class DukascopyProvider(Provider):
             hit = self._memo.get(str(path))
             if hit and hit[0] == stamp:
                 return hit[1], hit[2]
-            cached = pd.read_csv(path, index_col=0, parse_dates=True)
+            if path.suffix == ".parquet":
+                cached = pd.read_parquet(path)
+            else:
+                cached = pd.read_csv(path, index_col=0, parse_dates=True)
             cached.index = pd.to_datetime(cached.index, utc=True)
             covered_from = pd.Timestamp(json.loads(meta_path.read_text())["from"])
         except (ValueError, KeyError, OSError):
