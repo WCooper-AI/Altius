@@ -50,6 +50,14 @@ def summary_rows(res: BacktestResult) -> list[tuple[str, str]]:
         rows += [(label, _money(m[key], sym)) for key, label in (
             ("total_borrow", "Borrow fee paid (shorts)"), ("total_commission", "Commission paid"),
             ("total_slippage", "Slippage paid")) if m.get(key)]
+        if m.get("max_margin_used_pct") is not None:
+            rows.append(("Most margin held", f"{m['max_margin_used_pct']:.1f}% of the balance"))
+        if m.get("closed_out"):
+            rows.append(("Trades closed out at the close-out level", str(m["closed_out"])))
+    if m.get("fx"):
+        fx = m["fx"]
+        rows.append(("Currency", f"{fx['from']} converted to {fx['to']} at a fixed {fx['fixed']:g}" if fx.get("fixed")
+                     else f"{fx['from']} converted to {fx['to']} at each day's exchange rate"))
     return rows
 
 

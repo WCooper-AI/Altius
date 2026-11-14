@@ -12,7 +12,7 @@ async function viewPortfolio() {
   const chosen = new Set(pref("ta-portfolio", "").split(",").filter((id) => ok.some((x) => x.id === id)));
   let balance = null;
   const opts = { weighting: "equal", weights: {}, shared: false, max_open_trades: null, max_open_risk_pct: null,
-    max_daily_loss_pct: null, max_weekly_loss_pct: null, max_drawdown_pct: null };
+    max_daily_loss_pct: null, max_weekly_loss_pct: null, max_drawdown_pct: null, max_margin_pct: null };
   const limitField = (key, label, tip) => h("div", { class: "field" }, h("label", {}, label, infoTip(tip)),
     numberInput(null, (n) => { opts[key] = n; }, { label, step: "any", min: "0", placeholder: "No limit", allowEmpty: true }));
   const out = h("div");
@@ -44,7 +44,8 @@ async function viewPortfolio() {
       numberInput(null, (n) => { opts.max_open_risk_pct = n; }, { label: "Most at risk at once", step: "any", min: "0", placeholder: "No limit", allowEmpty: true })),
     limitField("max_daily_loss_pct", "Daily loss limit (%)", "Once the shared balance has fallen this much since the start of the day (UTC), no new trades open until the next day. A loss counts on the day the trade closes. Leave blank for no limit."),
     limitField("max_weekly_loss_pct", "Weekly loss limit (%)", "The same as the daily limit, over a week (Monday to Sunday, UTC). Leave blank for no limit."),
-    limitField("max_drawdown_pct", "Drawdown limit (%)", "Once the shared balance is this much below its highest point, no new trades open for the rest of the test. Leave blank for no limit."));
+    limitField("max_drawdown_pct", "Drawdown limit (%)", "Once the shared balance is this much below its highest point, no new trades open for the rest of the test. Leave blank for no limit."),
+    limitField("max_margin_pct", "Margin limit (% of balance)", "A new trade is skipped if the margin held by all open trades, its own included, would be more than this % of the shared balance. Each strategy's margin rate is used. Leave blank for no limit."));
   const sharedBox = h("input", { type: "checkbox", onchange: (e) => { opts.shared = e.target.checked; caps.hidden = !opts.shared; } });
   showShares();
   run.addEventListener("click", async () => {
@@ -61,7 +62,7 @@ async function viewPortfolio() {
     if (opts.shared) {
       if (!isBlank(opts.max_open_trades)) body.max_open_trades = opts.max_open_trades;
       if (!isBlank(opts.max_open_risk_pct)) body.max_open_risk_pct = opts.max_open_risk_pct;
-      for (const k of ["max_daily_loss_pct", "max_weekly_loss_pct", "max_drawdown_pct"]) if (!isBlank(opts[k])) body[k] = opts[k];
+      for (const k of ["max_daily_loss_pct", "max_weekly_loss_pct", "max_drawdown_pct", "max_margin_pct"]) if (!isBlank(opts[k])) body[k] = opts[k];
     }
     run.disabled = true;
     clear(out).appendChild(h("p", { class: "loading" }, `Backtesting ${chosen.size} strategies…`));
@@ -100,6 +101,7 @@ function renderPortfolio(res, strategies) {
       h("div", {}, h("div", { class: "big " + (m.total_return_pct >= 0 ? "gain" : "loss") }, signed(m.total_return_pct, "%")), h("div", { class: "lbl" }, "Return together")),
       h("div", {}, h("div", { class: "big" }, num(m.max_drawdown_pct, 1) + "%"), h("div", { class: "lbl" }, "Worst drawdown")),
       h("div", {}, h("div", { class: "big" }, num(m.max_open_risk_pct, 1) + "%"), h("div", { class: "lbl" }, "Most at risk at once")),
+      m.max_margin_used_pct != null ? h("div", {}, h("div", { class: "big" }, num(m.max_margin_used_pct, 1) + "%"), h("div", { class: "lbl" }, "Most margin held")) : null,
       h("div", {}, h("div", { class: "big" }, String(m.trades)), h("div", { class: "lbl" }, res.shared ? "Trades taken" : "Trades")),
       res.shared ? h("div", {}, h("div", { class: "big" }, String(m.trades_skipped)), h("div", { class: "lbl" }, "Trades skipped")) : null,
       h("div", {}, h("div", { class: "big" }, num(m.time_in_market_pct, 0) + "%"), h("div", { class: "lbl" }, "Time in a trade")),
@@ -158,6 +160,7 @@ function skippedNote(sk) {
   if (sk.daily_loss) parts.push(`${sk.daily_loss} because the daily loss limit was reached`);
   if (sk.weekly_loss) parts.push(`${sk.weekly_loss} because the weekly loss limit was reached`);
   if (sk.drawdown) parts.push(`${sk.drawdown} because the drawdown limit was reached`);
+  if (sk.margin) parts.push(`${sk.margin} because the margin limit would have been passed`);
   return h("p", { class: "small muted" }, `${total} trades skipped: ${parts.join("; ")}.`);
 }
 

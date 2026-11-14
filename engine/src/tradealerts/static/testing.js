@@ -954,9 +954,27 @@ function renderWhyNoTrades(why) {
 function lossLimits(r, blocked) {
   const set = [r.max_daily_loss_pct != null ? `${short(r.max_daily_loss_pct)}% a day` : "",
     r.max_weekly_loss_pct != null ? `${short(r.max_weekly_loss_pct)}% a week` : "",
-    r.max_drawdown_pct != null ? `${short(r.max_drawdown_pct)}% from the high` : ""].filter(Boolean);
+    r.max_drawdown_pct != null ? `${short(r.max_drawdown_pct)}% from the high` : "",
+    r.max_margin_pct != null ? `margin up to ${short(r.max_margin_pct)}% of the balance` : ""].filter(Boolean);
   if (!set.length) return "None";
   return `${set.join(", ")}; ${blocked || 0} trade${blocked === 1 ? "" : "s"} stopped from opening`;
+}
+
+/** Which currency sizes were in, and how they were converted into the account's. */
+function currencyText(r, fx) {
+  if (r.size_currency !== "market" || !fx) return `Sizes and results in ${r.currency}`;
+  if (fx.fixed) return `Sizes in ${fx.from}, converted to ${fx.to} at a fixed ${short(fx.fixed)}`;
+  const range = fx.low != null ? ` (${short(+fx.low.toFixed(4))} to ${short(+fx.high.toFixed(4))})` : "";
+  return `Sizes in ${fx.from}, converted to ${fx.to} at each day's exchange rate${range}`;
+}
+
+/** The margin rate, the most margin any trade needed and any close-outs. */
+function marginText(r, meta) {
+  if (r.margin_pct == null) return "Not known for this market";
+  const parts = [`${short(r.margin_pct)}% of each trade's value`];
+  if (meta.max_margin_used_pct != null) parts.push(`at most ${short(+meta.max_margin_used_pct.toFixed(1))}% of the balance held`);
+  if (r.close_out_pct != null) parts.push(`close-out below ${short(r.close_out_pct)}% of margin, ${meta.closed_out || 0} trade${meta.closed_out === 1 ? "" : "s"} closed out`);
+  return parts.join("; ");
 }
 
 /** What exactly was tested, so the same backtest can be run again and compared. */
@@ -981,7 +999,8 @@ function testStamp(meta, sym, quality) {
     ["Borrow fee (shorts)", meta.borrow_pct ? `${short(meta.borrow_pct)}% a year` : "None"],
     ...(meta.risk ? [["Sizing", `${money(r.account_size, sym)} account, ${short(r.risk_per_trade_pct)}% risk a trade, ` +
       `${short(r.point_value)} per point, steps of ${short(r.size_step)}${r.compound ? ", compounding" : ", fixed account size"}`]] : []),
-    ...(meta.risk ? [["Loss limits", lossLimits(r, meta.blocked_by_limits)]] : []),
+    ...(meta.risk ? [["Currency", currencyText(r, meta.fx)], ["Margin", marginText(r, meta)]] : []),
+    ...(meta.risk ? [["Trade limits", lossLimits(r, meta.blocked_by_limits)]] : []),
     ...(meta.split_pct ? [["In-sample part", `First ${short(meta.split_pct)}% of the period`]] : []),
     ...(meta.data_fingerprint ? [["Price data fingerprint", `${meta.data_fingerprint} (${(meta.data_candles || 0).toLocaleString("en-GB")} candles, warm-up included)`]] : []),
     ...(quality ? [["Price data checks", issues.length ? h("ul", { class: "small" }, issues.map((i) => h("li", {}, i.text)))

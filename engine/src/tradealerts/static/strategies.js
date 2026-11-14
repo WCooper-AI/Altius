@@ -278,7 +278,8 @@ async function viewEditor(id, exampleName, preloaded, run) {
     const d = clone(data);
     if (d.exit && d.exit.when && !groupItems(d.exit.when).length) delete d.exit.when;
     if (d.exit && (d.exit.max_bars === null || d.exit.max_bars === undefined)) delete d.exit.max_bars;
-    for (const k of ["max_size", "point_value", "size_step", "min_size", "max_daily_loss_pct", "max_weekly_loss_pct", "max_drawdown_pct"])
+    for (const k of ["max_size", "point_value", "size_step", "min_size", "max_daily_loss_pct", "max_weekly_loss_pct", "max_drawdown_pct",
+      "size_currency", "market_currency", "fx_rate", "margin_pct", "max_margin_pct", "close_out_pct"])
       if (d.risk && isBlank(d.risk[k])) delete d.risk[k];
     for (const k of ["spread", "funding_pct", "slippage", "slippage_pct", "slippage_atr_pct"]) if (d.costs && isBlank(d.costs[k])) delete d.costs[k];
     if (d.exit && d.exit.target === null) delete d.exit.target;
@@ -706,6 +707,12 @@ const RISK_HELP = {
   max_daily_loss_pct: "Once the balance has fallen this much since the start of the day, no new trades open until the next day. Trades already open carry on. A loss counts on the day the trade closes. Days follow the market's time zone. Blank means no limit.",
   max_weekly_loss_pct: "The same as the daily limit, but over a week (Monday to Sunday). Blank means no limit.",
   max_drawdown_pct: "Once the balance is this much below its highest point so far, no new trades open for the rest of the backtest or forward test. Trades already open carry on. Blank means no limit.",
+  size_currency: "Spread bets are sized in your own currency (for example £1 per point), so nothing needs converting. CFDs and shares are sized in the market's currency (for example $1 per point on the US 500): profit, costs and margin are then converted into your currency at each day's exchange rate.",
+  market_currency: "The currency the market is priced in, as a 3-letter code such as USD. Built-in markets know their own, so leave it blank for them.",
+  fx_rate: "A fixed exchange rate: how much 1 unit of the market's currency is worth in your currency (for example 0.79 if $1 is worth £0.79). Blank downloads the daily rate, so the conversion follows the real rate over the test.",
+  margin_pct: "The share of a trade's value your broker holds while it's open. Retail CFD brokers in the UK and EU hold at least 3.33% on major currency pairs, 5% on major indices and gold, 10% on other indices and commodities, 20% on shares and 50% on crypto. Blank uses the built-in market's rate.",
+  max_margin_pct: "No new trade opens if the margin it needs would be more than this % of the balance. Your broker won't open a trade you can't cover, so 100% matches that. Blank means no limit.",
+  close_out_pct: "Brokers close your trades when the balance plus open profit or loss falls below a share of the margin held (50% for retail clients in the UK and EU). Set it to see when that would have happened; the trade then closes at market. Blank means it's never checked.",
   funding_pct: "The yearly interest your broker charges for holding a CFD past its daily cut-off (around 10pm UK time). Brokers publish it as a daily or yearly rate: enter the yearly percentage. Blank uses the built-in market's typical rate.",
   priority: "How phone alerts arrive in ntfy. High and urgent can sound even when the phone is on Do Not Disturb (depending on your phone's settings).",
   compound: "On: trade sizes grow and shrink with the balance, like a real account. Off: every trade is sized from the starting balance, which makes results from different periods easier to compare.",
@@ -749,6 +756,11 @@ function riskSection(data, changed) {
     numberInput(obj[key], (n) => { obj[key] = n; changed(); }, { label, ...opts }),
     note ? h("span", { class: "small muted" }, note) : null);
   const cur = choiceSelect(app.meta.currencies.map((x) => [x, x]), r.currency, (v) => { r.currency = v; changed(); }, { label: "Currency" });
+  const sizeIn = h("select", { "aria-label": "Size is in", onchange: (e) => { r.size_currency = e.target.value === "account" ? null : e.target.value; changed(); } },
+    h("option", { value: "account" }, "Your account currency"), h("option", { value: "market" }, "The market's own currency"));
+  sizeIn.value = r.size_currency || "account";
+  const quote = h("input", { type: "text", maxlength: "3", "aria-label": "Market's currency", placeholder: "e.g. USD", value: r.market_currency || "",
+    oninput: (e) => { const v = e.target.value.trim().toUpperCase(); r.market_currency = v || null; changed(); } });
   const prio = h("select", { onchange: (e) => { a.priority = e.target.value; changed(); } },
     app.meta.priorities.map((x) => h("option", { value: x }, x[0].toUpperCase() + x.slice(1))));
   prio.value = a.priority || "default";
@@ -770,6 +782,14 @@ function riskSection(data, changed) {
       f("Daily loss limit (%)", "max_daily_loss_pct", { step: "any", min: "0", allowEmpty: true }, r, "No new trades for the rest of the day. Blank: no limit"),
       f("Weekly loss limit (%)", "max_weekly_loss_pct", { step: "any", min: "0", allowEmpty: true }, r, "No new trades for the rest of the week. Blank: no limit"),
       f("Drawdown limit (%)", "max_drawdown_pct", { step: "any", min: "0", allowEmpty: true }, r, "No new trades after falling this far from the high. Blank: no limit"),
+      h("div", { class: "field" }, h("label", {}, "Size is in", infoTip(RISK_HELP.size_currency)), sizeIn,
+        h("span", { class: "small muted" }, "Spread bets: your currency. CFDs and shares: the market's")),
+      h("div", { class: "field" }, h("label", {}, "Market's currency", infoTip(RISK_HELP.market_currency)), quote,
+        h("span", { class: "small muted" }, "Blank: the built-in market's currency")),
+      f("Fixed exchange rate", "fx_rate", { step: "any", min: "0", allowEmpty: true }, r, "1 unit of the market's currency in yours. Blank: daily rates are downloaded"),
+      f("Margin rate (%)", "margin_pct", { step: "any", min: "0", allowEmpty: true }, r, "Of a trade's value. Blank: the built-in market's rate"),
+      f("Margin limit (% of balance)", "max_margin_pct", { step: "any", min: "0", allowEmpty: true }, r, "No new trade past this much margin. Blank: no limit"),
+      f("Close-out level (% of margin)", "close_out_pct", { step: "any", min: "0", allowEmpty: true }, r, "Close the trade below this. Blank: never checked"),
       h("div", { class: "field" }, h("label", {}, "Alert priority", infoTip(RISK_HELP.priority)), prio)),
     h("div", { class: "inline", style: null },
       h("label", { class: "check" }, h("input", { type: "checkbox", checked: r.compound !== false,

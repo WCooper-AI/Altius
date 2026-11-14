@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import __version__, dataquality
+from . import __version__, dataquality, fxrates
 from . import data as data_mod
 from .backtest import run_backtest
 from .config import AppConfig, ConfigError
@@ -146,7 +146,8 @@ def _period_data(args, cfg, s):
         start = pd.Timestamp(args.start, tz="UTC")
     if args.end:
         df = df[df.index < pd.Timestamp(args.end, tz="UTC")]
-    return data_mod.closed_bars(df, s.market.timeframe), fine, start, notes
+    df = data_mod.closed_bars(df, s.market.timeframe)
+    return fxrates.attach(df, s, fxrates.loader(cfg)), fine, start, notes
 
 
 def cmd_check_data(args) -> int:

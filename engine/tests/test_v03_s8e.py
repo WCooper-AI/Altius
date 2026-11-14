@@ -99,7 +99,7 @@ def test_shared_account_without_caps_takes_every_trade(bars_1h):
     m = out["metrics"]
     assert m["trades"] == sum(len(res.trades) for _, _, res in parts)
     assert m["trades_skipped"] == 0 and out["skipped"] == {"open_trades": 0, "open_risk": 0, "too_small": 0,
-                                                 "daily_loss": 0, "weekly_loss": 0, "drawdown": 0}
+                                                 "daily_loss": 0, "weekly_loss": 0, "drawdown": 0, "margin": 0}
     assert m["end_equity"] == pytest.approx(5000 + sum(p["pnl"] for p in per.values()))
     assert float(out["pnl_curves"].sum(axis=1).iloc[-1]) == pytest.approx(m["end_equity"] - 5000)
     assert m["max_drawdown_pct"] <= 0 and 0 <= m["time_in_market_pct"] <= 100
@@ -176,7 +176,7 @@ def test_portfolio_route_custom_weights_and_shared(client):
     out = r.json()
     assert out["shared"] is True and out["weighting"] == "custom"
     assert out["weights"][a] == pytest.approx(60) and out["weights"][b] == pytest.approx(40)
-    assert set(out["skipped"]) == {"open_trades", "open_risk", "too_small", "daily_loss", "weekly_loss", "drawdown"}
+    assert set(out["skipped"]) == {"open_trades", "open_risk", "too_small", "daily_loss", "weekly_loss", "drawdown", "margin"}
     assert "trades_skipped" in out["metrics"] and out["metrics"]["max_open_trades"] <= 1
     assert all({"taken", "skipped", "weight_pct"} <= set(p) for p in out["per_strategy"])
     assert set(out["pnl_curves"]) == {a, b}

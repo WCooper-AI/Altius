@@ -10,7 +10,7 @@ from typing import Callable
 import pandas as pd
 
 from . import data as data_mod
-from . import timeframes, versions, watch
+from . import fxrates, timeframes, versions, watch
 from .config import AppConfig
 from .notify import Message, Notifier, broadcast
 from .backtest import fine_lookup, spreads_for
@@ -147,6 +147,7 @@ def process_strategy(
     notifiers: list[Notifier],
     now: pd.Timestamp | None = None,
     loader: Callable[[AppConfig, Strategy], pd.DataFrame] = load_market_data,
+    fx_load: Callable[[str, int], pd.DataFrame] | None = None,
 ) -> list[Event]:
     """Advance a strategy's forward test over any candles that closed since the last check.
 
@@ -164,6 +165,7 @@ def process_strategy(
     except Exception as exc:
         log.warning("%s: data check failed: %s", strategy.id, exc)
     df = data_mod.closed_bars(raw, strategy.market.timeframe, now)
+    df = fxrates.attach(df, strategy, fx_load or fxrates.loader(cfg))
     if df.empty:
         log.warning("%s: no closed candles yet", strategy.id)
         return []
@@ -196,6 +198,7 @@ def process_strategy(
     sim = Simulator(strategy, state)
     get_fine = fine_lookup(fine, tf)
     spreads = spreads_for(strategy, df)
+    fx = fxrates.fx_for(strategy, df)
     last = len(df) - 1
     o, h, l, c = (df[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))
     all_events: list[Event] = []
@@ -204,7 +207,7 @@ def process_strategy(
         for ev in sim.step(t, o[i], h[i], l[i], c[i], bool(prepared.entry[i]),
                            bool(prepared.exit[i]), prepared.refs_at(i),
                            spread=None if spreads is None else spreads[i], fine=lambda t=t: get_fine(t),
-                           values=prepared.values_at(i)):
+                           values=prepared.values_at(i), fx=None if fx is None else fx[i]):
             all_events.append(ev)
             if ev.kind == "closed":
                 store.add_trade(strategy.id, ev.data, run["id"])
@@ -235,7 +238,7 @@ def process_strategy(
 
 def run_cycle(cfg: AppConfig, store: StateStore, notifiers: list[Notifier],
               now: pd.Timestamp | None = None, loader=load_market_data,
-              problems: dict[str, str] | None = None, price_loader=None) -> dict[str, list[Event]]:
+              problems: dict[str, str] | None = None, price_loader=None, fx_cache=None) -> dict[str, list[Event]]:
     """One check of every strategy that has a running forward test or alerts switched on.
 
     ``problems`` (if given) is updated with each strategy's latest error, and cleared
@@ -248,11 +251,12 @@ def run_cycle(cfg: AppConfig, store: StateStore, notifiers: list[Notifier],
             problems.pop(sid, None)
     running = store.active_runs()
     results: dict[str, list[Event]] = {}
+    fx_load = fxrates.loader(cfg, fx_cache)
     for s in strategies:
         if not is_live(s) and s.id not in running:
             continue
         try:
-            results[s.id] = process_strategy(cfg, s, store, notifiers, now, loader)
+            results[s.id] = process_strategy(cfg, s, store, notifiers, now, loader, fx_load)
             if problems is not None:
                 problems.pop(s.id, None)
         except Exception as exc:  # one bad market shouldn't stop the others
@@ -393,7 +397,7 @@ class LiveRunner:
         notifiers = build_notifiers(cfg.notifiers)
         with ws.store() as store:
             results = run_cycle(cfg, store, notifiers, problems=problems, loader=cached_loader(self.cache),
-                                price_loader=self._price_loader)
+                                price_loader=self._price_loader, fx_cache=self.cache)
             self.last_results[ws.key] = {k: len(v) for k, v in results.items()}
             try:
                 from . import weekly

@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     exit_time TEXT, exit_price REAL, size REAL, stop REAL, target REAL,
     exit_reason TEXT, pnl REAL, r_multiple REAL, bars_held INTEGER, equity_after REAL,
     funding REAL, spread_cost REAL, borrow REAL, commission REAL, slippage_cost REAL,
-    entry_reason TEXT, exit_values TEXT, mae_r REAL, mfe_r REAL, financing REAL
+    entry_reason TEXT, exit_values TEXT, mae_r REAL, mfe_r REAL, financing REAL,
+    fx_entry REAL, fx REAL, margin REAL
 );
 CREATE TABLE IF NOT EXISTS run_equity (
     run_id INTEGER NOT NULL,
@@ -133,7 +134,7 @@ TRADE_COLS = [
     "direction", "signal_time", "entry_time", "entry_price", "exit_time", "exit_price", "size",
     "stop", "target", "exit_reason", "pnl", "r_multiple", "bars_held", "equity_after",
     "funding", "spread_cost", "entry_reason", "exit_values", "mae_r", "mfe_r", "borrow", "commission",
-    "slippage_cost", "financing",
+    "slippage_cost", "financing", "fx_entry", "fx", "margin",
 ]
 JSON_COLS = ("entry_reason", "exit_values")
 
@@ -161,6 +162,8 @@ class StateStore:
                                  ("paper_trades", "entry_reason", "TEXT"), ("paper_trades", "exit_values", "TEXT"),
                                  ("paper_trades", "borrow", "REAL"), ("paper_trades", "commission", "REAL"),
                                  ("paper_trades", "slippage_cost", "REAL"),
+                                 ("paper_trades", "fx_entry", "REAL"), ("paper_trades", "fx", "REAL"),
+                                 ("paper_trades", "margin", "REAL"),
                                  ("price_alerts", "repeat", "TEXT NOT NULL DEFAULT 'once'"),
                                  ("price_alerts", "cooldown_minutes", "INTEGER NOT NULL DEFAULT 60"),
                                  ("price_alerts", "cross", "INTEGER NOT NULL DEFAULT 0"),

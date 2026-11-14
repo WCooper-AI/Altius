@@ -27,6 +27,15 @@ How trades are filled, modelled on a CFD/spread-bet broker:
   ``slippage_cost``.
 * ``risk.max_daily_loss_pct``, ``risk.max_weekly_loss_pct`` and ``risk.max_drawdown_pct``
   stop new entries (a ``skipped`` event with ``limit`` set) as described in :mod:`limits`.
+* With ``risk.size_currency: market`` the size is money per point in the market's own
+  currency (``risk.market_currency``). Every amount (profit, costs, margin, sizing) is
+  converted into the account currency at the rate known at the time (see :mod:`fxrates`):
+  the profit at the exit's rate, funding night by night, each commission at its fill.
+  ``fx_entry`` and ``fx`` on a trade are the rates at entry and exit (1 when nothing converts).
+* Margin is ``risk.margin_pct`` of the position's value when it opens (``margin`` on a trade).
+  ``risk.max_margin_pct`` skips an entry whose margin would be more than that % of the balance
+  (limit ``margin``). ``risk.close_out_pct`` closes the trade at market (``close_out``) once the
+  balance plus the open profit or loss falls below that % of the margin, checked like a stop.
 
 State is a plain dict so live runs can save it to disk between checks.
 """
@@ -95,6 +104,7 @@ class Simulator:
         r = strategy.risk
         self._limits = (r.max_daily_loss_pct, r.max_weekly_loss_pct, r.max_drawdown_pct)
         self._limited = any(x is not None for x in self._limits)
+        self._convert = r.converts
 
     # ------------------------------------------------------------------ helpers
 
@@ -110,6 +120,18 @@ class Simulator:
             raise ValueError(f"Candle spread must be a finite number of 0 or more, got {spread}")
         return spread / 2
 
+    def _rate(self) -> float:
+        """Account money per 1 unit of the market's money now (1 when nothing converts)."""
+        r = self.s.risk
+        if not self._convert:
+            return 1.0
+        if r.fx_rate:
+            return r.fx_rate
+        fx = self.state.get("fx")
+        if fx is None:
+            raise ValueError(f"No {r.market_currency}/{r.currency} exchange rate to convert this market's money")
+        return fx
+
     def _sizing_equity(self) -> float:
         return self.state["equity"] if self.s.risk.compound else self.s.risk.account_size
 
@@ -117,7 +139,7 @@ class Simulator:
         r = self.s.risk
         return position_size(
             self._sizing_equity(), r.risk_per_trade_pct, abs(entry - stop),
-            r.point_value, r.size_step, r.min_size, r.max_size,
+            r.point_value * self._rate(), r.size_step, r.min_size, r.max_size,
         )
 
     def unrealised(self, price: float, half_spread: float | None = None) -> float:
@@ -127,12 +149,12 @@ class Simulator:
             return 0.0
         hs = self.state.get("half_spread", 0.0) if half_spread is None else half_spread
         exit_px = price - self.s.sign * hs
-        return (exit_px - p["entry_price"]) * self.s.sign * p["size"] * self.s.risk.point_value
+        return (exit_px - p["entry_price"]) * self.s.sign * p["size"] * self.s.risk.point_value * self._rate()
 
     def _commission(self, price: float, size: float) -> float:
         """Cost of one fill at ``price``: a flat amount plus a % of the fill's value."""
         s = self.s
-        return s.commission + price * size * s.risk.point_value * s.commission_pct / 100
+        return s.commission + price * size * s.risk.point_value * self._rate() * s.commission_pct / 100
 
     def _slip(self, price: float) -> float:
         """Price points lost to slippage on one market fill at ``price``."""
@@ -155,13 +177,26 @@ class Simulator:
         borrow_pct = self.s.borrow_pct if self.s.sign < 0 else 0.0
         nights = nights_between(p["funded_until"], until) if self.s.funding_pct or borrow_pct else 0
         if nights:
-            value = price * p["size"] * self.s.risk.point_value
+            value = price * p["size"] * self.s.risk.point_value * self._rate()
             funding = nights * value * self.s.funding_pct / 100 / 365
             borrow = nights * value * borrow_pct / 100 / 365
             p["funding"] = p.get("funding", 0.0) + funding
             p["borrow"] = p.get("borrow", 0.0) + borrow
             self.state["equity"] -= funding + borrow
         p["funded_until"] = str(until)
+
+    def _margin(self, price: float, size: float) -> float:
+        """Margin a broker holds for a position of ``size`` opened at ``price``, in account money."""
+        m = self.s.risk.margin_pct
+        return price * size * self.s.risk.point_value * self._rate() * m / 100 if m else 0.0
+
+    def _close_out_level(self, p: dict) -> float | None:
+        """The exit-side price at which balance plus open P&L falls to the close-out level."""
+        k = self.s.risk.close_out_pct
+        if k is None or not p.get("margin"):
+            return None
+        per_point = p["size"] * self.s.risk.point_value * self._rate()
+        return p["entry_price"] + self.s.sign * (k / 100 * p["margin"] - self.state["equity"]) / per_point
 
     def _excursion(self, p: dict, h: float, l: float, hs: float) -> None:
         """Track the worst and best the trade got to, at the side of the book it would exit on."""
@@ -189,15 +224,16 @@ class Simulator:
         exit_price -= s.sign * slip
         if not math.isfinite(exit_price):
             raise InvariantError(f"Exit price at {time} isn't a number")
-        gross = (exit_price - p["entry_price"]) * s.sign * p["size"] * s.risk.point_value
+        fx, fx_in = self._rate(), p.get("fx_entry", 1.0)
+        gross = (exit_price - p["entry_price"]) * s.sign * p["size"] * s.risk.point_value * fx
         funding, borrow = p.get("funding", 0.0), p.get("borrow", 0.0)
         financing = funding + borrow
         commission = p.get("commission", 0.0) + self._commission(exit_price, p["size"])
         pnl = gross - financing - commission
-        risk_amount = abs(p["entry_price"] - p["stop"]) * p["size"] * s.risk.point_value
+        risk_amount = abs(p["entry_price"] - p["stop"]) * p["size"] * s.risk.point_value * fx_in
         exit_r = (exit_price - p["entry_price"]) * s.sign / abs(p["entry_price"] - p["stop"]) if p["stop"] != p["entry_price"] else 0.0
-        spread_cost = (p.get("entry_half_spread", 0.0) + exit_half_spread) * p["size"] * s.risk.point_value
-        slippage_cost = (p.get("entry_slippage", 0.0) + slip) * p["size"] * s.risk.point_value
+        spread_cost = (p.get("entry_half_spread", 0.0) * fx_in + exit_half_spread * fx) * p["size"] * s.risk.point_value
+        slippage_cost = (p.get("entry_slippage", 0.0) * fx_in + slip * fx) * p["size"] * s.risk.point_value
         # funding was already taken night by night and the entry commission on the fill
         self.state["equity"] += gross - (commission - p.get("commission", 0.0))
         self.state["position"] = None
@@ -229,7 +265,10 @@ class Simulator:
             # so the worst/best point while open can't go beyond the exit price itself
             "mae_r": max(p.get("mae_r", 0.0), exit_r) if exit_r < 0 else p.get("mae_r", 0.0),
             "mfe_r": min(p.get("mfe_r", 0.0), exit_r) if exit_r > 0 else p.get("mfe_r", 0.0),
-            "financing": financing,  # funding + borrow; last, like the saved paper-trade column
+            "financing": financing,  # funding + borrow; same order as the saved paper-trade columns
+            "fx_entry": fx_in,
+            "fx": fx,
+            "margin": p.get("margin", 0.0),
         }
         return Event("closed", time, trade)
 
@@ -278,6 +317,42 @@ class Simulator:
                     return ("target", p["target"])
         return ("stop", p["stop"])
 
+    def _exit_hit(self, p, o, h, l, hs, opened_now, fine):
+        """Stop, target or close-out inside this candle, as (reason, price), or None."""
+        sign, level = self.s.sign, self._close_out_level(p)
+        if level is None or (level - p["stop"]) * sign <= 0:  # the stop comes first, or no close-out
+            return self._resolve_exit(p, o, h, l, hs, opened_now, fine)
+        if (level - (o - sign * hs)) * sign >= 0:  # already past it when the candle opens
+            return ("close_out", o - sign * hs)
+        hit = self._resolve_exit({**p, "stop": level}, o, h, l, hs, opened_now, fine)
+        return ("close_out", hit[1]) if hit and hit[0] == "stop" else hit
+
+    def _open(self, time, pend, fill, stop, target, size, hs, slip, margin, events) -> None:
+        st = self.state
+        st["position"] = {
+            "signal_time": pend["signal_time"],
+            "entry_time": str(time),
+            "entry_price": fill,
+            "stop": stop,
+            "target": target,
+            "size": size,
+            "bars_held": 0,
+            "entry_half_spread": hs,
+            "entry_slippage": slip,
+            "funding": 0.0,
+            "borrow": 0.0,
+            "commission": self._commission(fill, size),
+            "funded_until": str(time),
+            "entry_reason": pend.get("reason") or {},
+            "mae_r": 0.0,  # worst point while open, in R (0 or below)
+            "mfe_r": 0.0,  # best point while open, in R (0 or above)
+            "fx_entry": self._rate(),
+            "margin": margin,
+        }
+        st["equity"] -= st["position"]["commission"]
+        events.append(Event("opened", time, {k: v for k, v in st["position"].items()
+                                             if k not in ("funded_until",)}))
+
     # ------------------------------------------------------------------ main step
 
     def step(
@@ -290,8 +365,10 @@ class Simulator:
         spread: float | None = None,
         fine: Callable[[], Any] | None = None,
         values: dict[str, float | None] | None = None,
+        fx: float | None = None,
     ) -> list[Event]:
-        """``values``: what the entry rule read on this candle (indicator values), kept with the trade."""
+        """``values``: what the entry rule read on this candle (indicator values), kept with the trade.
+        ``fx``: account money per 1 unit of the market's money known at this candle's open."""
         s, st, sign = self.s, self.state, self.s.sign
         if not (math.isfinite(o) and math.isfinite(h) and math.isfinite(l) and math.isfinite(c)):
             raise ValueError(f"Candle at {time} has a missing or invalid price")
@@ -301,6 +378,8 @@ class Simulator:
         events: list[Event] = []
         if s.slippage_atr_pct:
             st["slip_atr"] = refs.get("slip_atr")
+        if self._convert and fx is not None and math.isfinite(fx) and fx > 0:
+            st["fx"] = float(fx)
         if self._limited:  # start a new day or week from the balance it opened with
             limits.roll(st.setdefault("limits", {}), time, st["equity"], s.market.tz)
 
@@ -327,37 +406,22 @@ class Simulator:
                 size = self.size_for(fill, stop)
                 if not math.isfinite(size) or size <= 0:
                     raise SkipTrade("position size rounds to zero at your risk settings")
+                margin = self._margin(fill, size)
             except SkipTrade as exc:
                 events.append(Event("skipped", time, {"reason": str(exc)}))
             else:
-                st["position"] = {
-                    "signal_time": pend["signal_time"],
-                    "entry_time": str(time),
-                    "entry_price": fill,
-                    "stop": stop,
-                    "target": target,
-                    "size": size,
-                    "bars_held": 0,
-                    "entry_half_spread": hs,
-                    "entry_slippage": slip,
-                    "funding": 0.0,
-                    "borrow": 0.0,
-                    "commission": self._commission(fill, size),
-                    "funded_until": str(time),
-                    "entry_reason": pend.get("reason") or {},
-                    "mae_r": 0.0,  # worst point while open, in R (0 or below)
-                    "mfe_r": 0.0,  # best point while open, in R (0 or above)
-                }
-                st["equity"] -= st["position"]["commission"]
-                events.append(Event("opened", time, {k: v for k, v in st["position"].items()
-                                                     if k not in ("funded_until",)}))
+                cap = s.risk.max_margin_pct
+                if cap is not None and margin > st["equity"] * cap / 100 + 1e-9 * max(1.0, abs(st["equity"])):
+                    events.append(Event("skipped", time, {"reason": limits.REASONS["margin"], "limit": "margin"}))
+                else:
+                    self._open(time, pend, fill, stop, target, size, hs, slip, margin, events)
 
         # 3. stop / target inside this candle
         p = st["position"]
         if p:
             self._excursion(p, h, l, hs)
             opened_now = p["entry_time"] == str(time)
-            hit = self._resolve_exit(p, o, h, l, hs, opened_now, fine)
+            hit = self._exit_hit(p, o, h, l, hs, opened_now, fine)
             if hit:
                 events.append(self._close(time, hit[1], hit[0], hs))
 
