@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     exit_time TEXT, exit_price REAL, size REAL, stop REAL, target REAL,
     exit_reason TEXT, pnl REAL, r_multiple REAL, bars_held INTEGER, equity_after REAL,
     funding REAL, spread_cost REAL, borrow REAL, commission REAL, slippage_cost REAL,
-    entry_reason TEXT, exit_values TEXT, mae_r REAL, mfe_r REAL
+    entry_reason TEXT, exit_values TEXT, mae_r REAL, mfe_r REAL, financing REAL
 );
 CREATE TABLE IF NOT EXISTS run_equity (
     run_id INTEGER NOT NULL,
@@ -133,7 +133,7 @@ TRADE_COLS = [
     "direction", "signal_time", "entry_time", "entry_price", "exit_time", "exit_price", "size",
     "stop", "target", "exit_reason", "pnl", "r_multiple", "bars_held", "equity_after",
     "funding", "spread_cost", "entry_reason", "exit_values", "mae_r", "mfe_r", "borrow", "commission",
-    "slippage_cost",
+    "slippage_cost", "financing",
 ]
 JSON_COLS = ("entry_reason", "exit_values")
 
@@ -171,6 +171,11 @@ class StateStore:
             cols = [r[1] for r in self.db.execute(f"PRAGMA table_info({table})")]
             if cols and col not in cols:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")
+        cols = [r[1] for r in self.db.execute("PRAGMA table_info(paper_trades)")]
+        if cols and "financing" not in cols:
+            # trades saved before then kept the borrow fee inside ``funding``; split it out once
+            self.db.execute("ALTER TABLE paper_trades ADD COLUMN financing REAL")
+            self.db.execute("UPDATE paper_trades SET financing = funding, funding = funding - COALESCE(borrow, 0)")
         self.db.commit()
 
     def close(self):

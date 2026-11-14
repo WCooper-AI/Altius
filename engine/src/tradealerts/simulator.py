@@ -15,7 +15,8 @@ How trades are filled, modelled on a CFD/spread-bet broker:
   closes at the close of the Nth candle held (the entry candle counts as 1).
 * Overnight funding is charged for each 22:00 UTC a position is held over, at
   ``costs.funding_pct`` a year on the position's value. Short positions also pay
-  ``costs.borrow_pct`` a year (stock borrow fee) over the same nights.
+  ``costs.borrow_pct`` a year (stock borrow fee) over the same nights. Each trade
+  reports them apart as ``funding`` and ``borrow``; ``financing`` is the two together.
 * ``costs.commission`` (money) and ``costs.commission_pct`` (% of the fill's value)
   are charged on the entry fill and again on the exit fill.
 * ``costs.slippage`` (price points) and ``costs.slippage_pct`` (% of the fill price)
@@ -40,6 +41,11 @@ from .strategy import SkipTrade, Strategy
 
 _CUT = 22 * 3600 * 10**9  # funding cut-off, 22:00 UTC, in ns
 _DAY = 86400 * 10**9
+STATE_VERSION = 2  # 2: an open position's ``funding`` no longer includes its ``borrow``
+
+
+class InvariantError(RuntimeError):
+    """The simulator reached a state that should be impossible (a bug, not bad settings)."""
 
 
 def nights_between(a, b) -> int:
@@ -57,6 +63,7 @@ class Event:
 
 def new_state(strategy: Strategy) -> dict:
     return {
+        "version": STATE_VERSION,
         "equity": strategy.risk.account_size,
         "position": None,
         "pending_entry": None,
@@ -66,10 +73,20 @@ def new_state(strategy: Strategy) -> dict:
     }
 
 
+def upgrade_state(state: dict) -> dict:
+    """Bring a saved state up to date. Version 1 kept an open short's borrow fee inside ``funding``."""
+    if state.get("version", 1) < 2:
+        p = state.get("position")
+        if p and p.get("borrow"):
+            p["funding"] = p.get("funding", 0.0) - p["borrow"]
+        state["version"] = 2
+    return state
+
+
 class Simulator:
     def __init__(self, strategy: Strategy, state: dict | None = None):
         self.s = strategy
-        self.state = state if state is not None else new_state(strategy)
+        self.state = upgrade_state(state) if state is not None else new_state(strategy)
         self.bar = timeframes.to_timedelta(strategy.market.timeframe)
 
     # ------------------------------------------------------------------ helpers
@@ -105,10 +122,6 @@ class Simulator:
         exit_px = price - self.s.sign * hs
         return (exit_px - p["entry_price"]) * self.s.sign * p["size"] * self.s.risk.point_value
 
-    def _nightly_pct(self) -> float:
-        """Yearly % charged per night held: funding, plus the borrow fee when short."""
-        return self.s.funding_pct + (self.s.borrow_pct if self.s.sign < 0 else 0.0)
-
     def _commission(self, price: float, size: float) -> float:
         """Cost of one fill at ``price``: a flat amount plus a % of the fill's value."""
         s = self.s
@@ -119,20 +132,19 @@ class Simulator:
         return self.s.slippage + abs(price) * self.s.slippage_pct / 100
 
     def _accrue_funding(self, until, price: float) -> None:
+        """Take overnight funding, and the borrow fee when short, for each 22:00 UTC passed."""
         p = self.state["position"]
-        rate = self._nightly_pct()
-        if not p or not rate:
-            if p:
-                p["funded_until"] = str(until)
+        if not p:
             return
-        nights = nights_between(p["funded_until"], until)
+        borrow_pct = self.s.borrow_pct if self.s.sign < 0 else 0.0
+        nights = nights_between(p["funded_until"], until) if self.s.funding_pct or borrow_pct else 0
         if nights:
             value = price * p["size"] * self.s.risk.point_value
-            cost = nights * value * rate / 100 / 365
-            p["funding"] = p.get("funding", 0.0) + cost
-            if self.s.sign < 0 and self.s.borrow_pct:
-                p["borrow"] = p.get("borrow", 0.0) + nights * value * self.s.borrow_pct / 100 / 365
-            self.state["equity"] -= cost
+            funding = nights * value * self.s.funding_pct / 100 / 365
+            borrow = nights * value * borrow_pct / 100 / 365
+            p["funding"] = p.get("funding", 0.0) + funding
+            p["borrow"] = p.get("borrow", 0.0) + borrow
+            self.state["equity"] -= funding + borrow
         p["funded_until"] = str(until)
 
     def _excursion(self, p: dict, h: float, l: float, hs: float) -> None:
@@ -153,12 +165,19 @@ class Simulator:
         inside it, its end for exits at its close (time limit, end of data)."""
         p = self.state["position"]
         s = self.s
+        if not p:
+            raise InvariantError(f"A trade can't be closed twice: nothing is open at {time}")
+        if pd.Timestamp(time) < pd.Timestamp(p["entry_time"]):
+            raise InvariantError(f"A trade can't close ({time}) before it opens ({p['entry_time']})")
         slip = 0.0 if reason == "target" else self._slip(exit_price)
         exit_price -= s.sign * slip
+        if not math.isfinite(exit_price):
+            raise InvariantError(f"Exit price at {time} isn't a number")
         gross = (exit_price - p["entry_price"]) * s.sign * p["size"] * s.risk.point_value
-        funding = p.get("funding", 0.0)
+        funding, borrow = p.get("funding", 0.0), p.get("borrow", 0.0)
+        financing = funding + borrow
         commission = p.get("commission", 0.0) + self._commission(exit_price, p["size"])
-        pnl = gross - funding - commission
+        pnl = gross - financing - commission
         risk_amount = abs(p["entry_price"] - p["stop"]) * p["size"] * s.risk.point_value
         exit_r = (exit_price - p["entry_price"]) * s.sign / abs(p["entry_price"] - p["stop"]) if p["stop"] != p["entry_price"] else 0.0
         spread_cost = (p.get("entry_half_spread", 0.0) + exit_half_spread) * p["size"] * s.risk.point_value
@@ -185,7 +204,7 @@ class Simulator:
             "equity_after": self.state["equity"],
             "funding": funding,
             "spread_cost": spread_cost,
-            "borrow": p.get("borrow", 0.0),
+            "borrow": borrow,
             "commission": commission,
             "slippage_cost": slippage_cost,
             "entry_reason": p.get("entry_reason") or {},
@@ -194,6 +213,7 @@ class Simulator:
             # so the worst/best point while open can't go beyond the exit price itself
             "mae_r": max(p.get("mae_r", 0.0), exit_r) if exit_r < 0 else p.get("mae_r", 0.0),
             "mfe_r": min(p.get("mfe_r", 0.0), exit_r) if exit_r > 0 else p.get("mfe_r", 0.0),
+            "financing": financing,  # funding + borrow; last, like the saved paper-trade column
         }
         return Event("closed", time, trade)
 
@@ -257,6 +277,8 @@ class Simulator:
     ) -> list[Event]:
         """``values``: what the entry rule read on this candle (indicator values), kept with the trade."""
         s, st, sign = self.s, self.state, self.s.sign
+        if not (math.isfinite(o) and math.isfinite(h) and math.isfinite(l) and math.isfinite(c)):
+            raise ValueError(f"Candle at {time} has a missing or invalid price")
         hs = self._half_spread(spread)
         st["half_spread"] = hs
         self._values = values or {}
@@ -279,7 +301,7 @@ class Simulator:
             try:
                 stop, target = s.plan(fill, pend["refs"])
                 size = self.size_for(fill, stop)
-                if size <= 0:
+                if not math.isfinite(size) or size <= 0:
                     raise SkipTrade("position size rounds to zero at your risk settings")
             except SkipTrade as exc:
                 events.append(Event("skipped", time, {"reason": str(exc)}))
@@ -295,6 +317,7 @@ class Simulator:
                     "entry_half_spread": hs,
                     "entry_slippage": slip,
                     "funding": 0.0,
+                    "borrow": 0.0,
                     "commission": self._commission(fill, size),
                     "funded_until": str(time),
                     "entry_reason": pend.get("reason") or {},

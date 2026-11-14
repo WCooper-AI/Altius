@@ -54,7 +54,7 @@ def test_window_metrics_facts():
     assert m["trades"] == 10 and m["win_rate_pct"] == 100 and m["avg_r"] == 2.0
     assert m["profit_factor"] is not None and m["max_drawdown_pct"] == 0
     assert m["net_pnl"] == 200 and m["gross_pnl"] == pytest.approx(200 + 10 * 0.6)
-    assert m["spread_cost"] == pytest.approx(5.0) and m["funding"] == pytest.approx(1.0)
+    assert m["spread_cost"] == pytest.approx(5.0) and m["financing"] == pytest.approx(1.0)
     assert m["trades_per_month"] == pytest.approx(10 / ((9 * 24 + 6) / 24 / 30.4375))
     # the worst drop is measured from the running peak of the balance
     m = analysis.window_metrics(analysis.trades_frame([{"pnl": 50, "r_multiple": 1}, {"pnl": -105, "r_multiple": -2}]), 1000)

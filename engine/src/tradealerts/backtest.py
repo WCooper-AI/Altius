@@ -195,6 +195,7 @@ def compute_metrics(strategy: Strategy, trades: pd.DataFrame, equity: pd.Series,
         "total_spread_cost": float(trades["spread_cost"].sum()) if len(trades) else 0.0,
         "total_commission": float(trades["commission"].sum()) if len(trades) and "commission" in trades else 0.0,
         "total_borrow": float(trades["borrow"].sum()) if len(trades) and "borrow" in trades else 0.0,
+        "total_financing": float(trades["financing"].sum()) if len(trades) and "financing" in trades else 0.0,
         "total_slippage": float(trades["slippage_cost"].sum()) if len(trades) and "slippage_cost" in trades else 0.0,
         "sample_warning": sample_warning(len(trades)),
     }
