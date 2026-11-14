@@ -13,8 +13,9 @@ happen (``InvariantError``).
    far, the equity curve equals it whenever no trade is open (open trades add their
    unrealised P&L), and the final balance is the start plus every trade's P&L.
 5. Every fill has a real price and a time inside the data.
-6. Costs reconcile: P&L is the price move minus financing and commission, financing
-   is funding plus borrow, no cost is negative, and the reported totals add up.
+6. Costs reconcile: P&L is the price move (at the exit's exchange rate ``fx``) minus
+   financing and commission, financing is funding plus borrow, no cost is negative, and the
+   reported totals add up.
 7. Running the same inputs twice gives the same result (``same_result``).
 """
 
@@ -120,7 +121,8 @@ def check_part(strategy, trades: pd.DataFrame, equity: pd.Series, metrics: dict)
             for c in ("funding", "borrow", "commission", "spread_cost", "slippage_cost"):
                 if _num(t.get(c)) < 0:
                     problems.append(f"{tag}: {c} is negative ({t.get(c)})")
-        move = (t["exit_price"] - t["entry_price"]) * sign * size * pv
+        fx = _num(t.get("fx")) or 1.0  # account money per unit of market money at the exit
+        move = (t["exit_price"] - t["entry_price"]) * sign * size * pv * fx
         pnl = _num(t.get("pnl"))
         if not _same(pnl, move - financing - commission, move):
             problems.append(f"{tag}: P&L {pnl} isn't the price move {move} less financing {financing} "

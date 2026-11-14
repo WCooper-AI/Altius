@@ -201,7 +201,7 @@ def portfolio(parts: list[tuple], balance: float, currency: str, notes: list[str
 
     options: ``weighting`` (equal / inverse_vol / custom), ``weights`` ({id: share %} for custom),
     ``shared`` (replay through one compounding account), ``max_open_trades``, ``max_open_risk_pct``,
-    ``max_daily_loss_pct``, ``max_weekly_loss_pct``, ``max_drawdown_pct``.
+    ``max_daily_loss_pct``, ``max_weekly_loss_pct``, ``max_drawdown_pct``, ``max_margin_pct``.
     """
     options = options or {}
     results = []
@@ -218,7 +218,8 @@ def portfolio(parts: list[tuple], balance: float, currency: str, notes: list[str
     if options.get("shared"):
         out = analysis.shared_account(
             results, float(balance), weights, options.get("max_open_trades"), options.get("max_open_risk_pct"),
-            **{k: options.get(k) for k in ("max_daily_loss_pct", "max_weekly_loss_pct", "max_drawdown_pct")})
+            **{k: options.get(k) for k in ("max_daily_loss_pct", "max_weekly_loss_pct", "max_drawdown_pct",
+                                           "max_margin_pct")})
     else:
         out = analysis.portfolio(results, float(balance), weights)
     return _clean({

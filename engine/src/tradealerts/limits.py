@@ -1,4 +1,5 @@
 """Loss limits: stop opening new trades after a bad day, a bad week or a deep fall.
+(The margin limit, ``margin``, is checked where trades are sized; it shares the reasons and note.)
 
 Shared by one strategy's simulator and the shared-account portfolio. Losses are measured on
 the cash balance (closed trades and costs paid, not open trades' running profit), so a
@@ -18,6 +19,7 @@ REASONS = {
     "daily_loss": "the daily loss limit was reached; new trades resume the next day",
     "weekly_loss": "the weekly loss limit was reached; new trades resume next week",
     "drawdown": "the drawdown limit was reached; no new trades for the rest of this test",
+    "margin": "the margin this trade needs is more than your margin limit allows",
 }
 
 
@@ -70,10 +72,14 @@ def note(skips: list[tuple]) -> str | None:
     words = {"daily_loss": "the daily loss limit", "weekly_loss": "the weekly loss limit",
              "drawdown": "the drawdown limit"}
     counts = {k: sum(1 for _, x in skips if x == k) for k in words}
-    n = len(skips)
+    n = sum(counts.values())
     parts = [f"{c} by {words[k]}" for k, c in counts.items() if c]
-    text = f"Your loss limits stopped {n} trade{'s' if n != 1 else ''} from opening: {', '.join(parts)}."
+    text = f"Your loss limits stopped {n} trade{'s' if n != 1 else ''} from opening: {', '.join(parts)}." if n else ""
     halted = [t for t, x in skips if x == "drawdown"]
     if halted:
         text += f" The drawdown limit first stopped a trade on {pd.Timestamp(halted[0]):%d %b %Y}."
-    return text
+    m = sum(1 for _, x in skips if x == "margin")
+    if m:
+        text += (" " if text else "") + (f"Your margin limit stopped {m} trade{'s' if m != 1 else ''} from "
+                                         "opening, because the margin needed was more than it allows.")
+    return text or None

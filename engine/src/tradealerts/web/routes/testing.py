@@ -116,8 +116,13 @@ def stamp(ws: Workspace, s, body: dict, metrics: dict, out: dict | None = None) 
                  "point_value": r.point_value, "size_step": r.size_step, "min_size": r.min_size,
                  "max_size": r.max_size, "compound": r.compound, "currency": r.currency,
                  "max_daily_loss_pct": r.max_daily_loss_pct, "max_weekly_loss_pct": r.max_weekly_loss_pct,
-                 "max_drawdown_pct": r.max_drawdown_pct},
+                 "max_drawdown_pct": r.max_drawdown_pct, "size_currency": r.size_currency,
+                 "market_currency": r.market_currency, "fx_rate": r.fx_rate, "margin_pct": r.margin_pct,
+                 "max_margin_pct": r.max_margin_pct, "close_out_pct": r.close_out_pct},
+        "fx": metrics.get("fx"),           # how the market's money was converted, when it was
         "blocked_by_limits": metrics.get("blocked_by_limits"),
+        "max_margin_used_pct": metrics.get("max_margin_used_pct"),
+        "closed_out": metrics.get("closed_out"),
         "split_pct": metrics.get("split_pct"),
         "used_finer_candles": metrics.get("used_finer_candles"),
         "random_seed": analysis.SEED,
@@ -282,7 +287,7 @@ def _portfolio_options(body: dict, ids: list[str]) -> dict:
         max_open_risk_pct = None
     loss = {}
     for key, label in (("max_daily_loss_pct", "Daily loss limit"), ("max_weekly_loss_pct", "Weekly loss limit"),
-                       ("max_drawdown_pct", "Drawdown limit")):
+                       ("max_drawdown_pct", "Drawdown limit"), ("max_margin_pct", "Margin limit")):
         v = body.get(key)
         if v in (None, ""):
             loss[key] = None

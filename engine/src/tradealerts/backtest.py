@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from . import limits, timeframes
+from . import fxrates, limits, timeframes
 from .data import find_jumps
 from .markethours import trades_24_7
 from .simulator import Event, Simulator
@@ -47,7 +47,7 @@ def fine_lookup(fine: pd.DataFrame | None, bar: pd.Timedelta):
 
 
 def _limit_skips(skipped: list) -> int:
-    """How many entries the loss limits stopped."""
+    """How many entries the loss and margin limits stopped."""
     return sum(1 for e in skipped if e.data.get("limit"))
 
 
@@ -87,7 +87,7 @@ def split_index(first: int, n: int, split_pct: float) -> int:
     return cut
 
 
-def _simulate(strategy: Strategy, df: pd.DataFrame, prepared, a: int, b: int, get_fine, spreads):
+def _simulate(strategy: Strategy, df: pd.DataFrame, prepared, a: int, b: int, get_fine, spreads, fx=None):
     """One fresh account trading candles a..b-1; open trades are closed at the last one."""
     sim = Simulator(strategy)
     trades, skipped = [], []
@@ -102,6 +102,7 @@ def _simulate(strategy: Strategy, df: pd.DataFrame, prepared, a: int, b: int, ge
             spread=None if spreads is None else spreads[i],
             fine=lambda t=t: get_fine(t),
             values=prepared.values_at(i),
+            fx=None if fx is None else fx[i],
         )
         for ev in events:
             if ev.kind == "closed":
@@ -142,16 +143,22 @@ def run_backtest(strategy: Strategy, df: pd.DataFrame, fine: pd.DataFrame | None
     cut = len(df) if split_pct is None else split_index(first, len(df), split_pct)
     get_fine = fine_lookup(fine, bar)
     spreads = spreads_for(strategy, df)
-    trades_df, skipped, eq, in_market = _simulate(strategy, df, prepared, first, cut, get_fine, spreads)
+    fx = fxrates.fx_for(strategy, df)
+    if fxrates.needs_download(strategy) and fx is None:
+        r = strategy.risk
+        raise ValueError(f"This market is priced in {r.market_currency} and your account is in {r.currency}, "
+                         "but no exchange rates came with the prices. Type a fixed exchange rate in the risk settings.")
+    trades_df, skipped, eq, in_market = _simulate(strategy, df, prepared, first, cut, get_fine, spreads, fx)
     period = df.iloc[first:cut]
     metrics = compute_metrics(strategy, trades_df, eq, period, in_market)
     metrics["warmup_candles"] = first
     metrics["blocked_by_limits"] = _limit_skips(skipped)
     metrics["used_data_spread"] = spreads is not None
+    metrics["fx"] = fx_summary(strategy, fx, first, cut)
     metrics["used_finer_candles"] = fine is not None and not fine.empty
     split = {}
     if split_pct is not None:
-        oos_trades, oos_skipped, oos_eq, oos_in = _simulate(strategy, df, prepared, cut, len(df), get_fine, spreads)
+        oos_trades, oos_skipped, oos_eq, oos_in = _simulate(strategy, df, prepared, cut, len(df), get_fine, spreads, fx)
         skipped += oos_skipped
         oos_metrics = compute_metrics(strategy, oos_trades, oos_eq, df.iloc[cut:], oos_in)
         oos_metrics["blocked_by_limits"] = _limit_skips(oos_skipped)
@@ -208,6 +215,8 @@ def compute_metrics(strategy: Strategy, trades: pd.DataFrame, equity: pd.Series,
         "total_financing": float(trades["financing"].sum()) if len(trades) and "financing" in trades else 0.0,
         "total_slippage": float(trades["slippage_cost"].sum()) if len(trades) and "slippage_cost" in trades else 0.0,
         "sample_warning": sample_warning(len(trades)),
+        "max_margin_used_pct": peak_margin_pct(trades),
+        "closed_out": int((trades["exit_reason"] == "close_out").sum()) if len(trades) else 0,
     }
     if len(trades):
         pnl = trades["pnl"]
@@ -236,6 +245,30 @@ def compute_metrics(strategy: Strategy, trades: pd.DataFrame, equity: pd.Series,
     m["longest_underwater_days"] = longest_underwater_days(equity)
     m["monthly_returns"] = monthly_returns(equity)
     return m
+
+
+def peak_margin_pct(trades: pd.DataFrame) -> float | None:
+    """The most margin any trade needed, as a % of the balance when it opened (None without margin)."""
+    if not len(trades) or "margin" not in trades or not (trades["margin"].fillna(0) > 0).any():
+        return None
+    before = trades["equity_after"] - trades["pnl"]  # the balance when each trade opened
+    pct = trades["margin"].fillna(0) / before.where(before > 0) * 100
+    return float(pct.max()) if pct.notna().any() else None
+
+
+def fx_summary(strategy: Strategy, fx: np.ndarray | None, a: int, b: int) -> dict | None:
+    """How the market's money was converted into the account currency, for the run record."""
+    r = strategy.risk
+    if not r.converts:
+        return None
+    out = {"from": r.market_currency, "to": r.currency}
+    if r.fx_rate:
+        return {**out, "fixed": r.fx_rate}
+    part = fx[a:b] if fx is not None else np.array([])
+    part = part[np.isfinite(part)]
+    if len(part):
+        out.update(first=float(part[0]), last=float(part[-1]), low=float(part.min()), high=float(part.max()))
+    return out
 
 
 # --------------------------------------------------------------------------- deeper metrics

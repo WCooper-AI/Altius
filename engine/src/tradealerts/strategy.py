@@ -58,10 +58,23 @@ class Risk:
     max_daily_loss_pct: float | None = None  # no new trades for the rest of a day that has lost this %
     max_weekly_loss_pct: float | None = None  # ... of a week
     max_drawdown_pct: float | None = None  # no new trades at all once the balance is this % below its high
+    size_currency: str = "account"  # "account": size is money per point in the account currency (spread bet);
+    # "market": in the market's own currency (CFDs, shares), converted to the account currency
+    market_currency: str | None = None  # the currency the market is priced in
+    fx_rate: float | None = None  # fixed account money per 1 unit of market money; blank downloads the rate
+    margin_pct: float | None = None  # % of a position's value held as margin
+    max_margin_pct: float | None = None  # no new trade that would take margin held past this % of the balance
+    close_out_pct: float | None = None  # close everything when balance plus open P&L falls below this % of margin
 
     @property
     def symbol(self) -> str:
         return CURRENCY_SYMBOLS.get(self.currency.upper(), self.currency + " ")
+
+    @property
+    def converts(self) -> bool:
+        """True when trades make money in another currency that has to be converted."""
+        return (self.size_currency == "market" and bool(self.market_currency)
+                and self.market_currency.upper() != self.currency.upper())
 
 
 @dataclass
@@ -282,6 +295,31 @@ def _limit_pct(r: dict, key: str) -> float | None:
     return v
 
 
+def _money_settings(r: dict, builtin: dict) -> dict:
+    """Currency and margin settings. Blank market currency and margin rate use the built-in market's."""
+    size_currency = str(r.get("size_currency") or "account")
+    if size_currency not in ("account", "market"):
+        raise StrategyError("risk.size_currency must be 'account' or 'market'")
+    quote = r.get("market_currency") or builtin.get("quote")
+    if quote is not None and not (isinstance(quote, str) and re.fullmatch(r"[A-Za-z]{3}", quote)):
+        raise StrategyError("risk.market_currency must be a 3-letter currency code like USD")
+    if size_currency == "market" and not quote:
+        raise StrategyError("risk.market_currency: say which currency this market is priced in")
+    fx_rate = _number(r.get("fx_rate"), "risk.fx_rate", 0, allow_none=True)
+    if fx_rate == 0:
+        raise StrategyError("risk.fx_rate must be above 0, or blank to download the rate")
+    margin = _number(r.get("margin_pct") if r.get("margin_pct") not in (None, "") else builtin.get("margin"),
+                     "risk.margin_pct", 0, allow_none=True)
+    if margin is not None and not 0 < margin <= 100:
+        raise StrategyError("risk.margin_pct must be a % above 0 and up to 100")
+    cap, close_out = _limit_pct(r, "max_margin_pct"), _limit_pct(r, "close_out_pct")
+    if (cap is not None or close_out is not None) and margin is None:
+        raise StrategyError("risk.margin_pct: the margin limits need this market's margin rate "
+                            "(the % of a position's value your broker holds)")
+    return {"size_currency": size_currency, "market_currency": quote.upper() if quote else None,
+            "fx_rate": fx_rate, "margin_pct": margin, "max_margin_pct": cap, "close_out_pct": close_out}
+
+
 def _level_spec(spec, path, allow_r=False):
     if not isinstance(spec, dict):
         raise StrategyError(f"{path} must be a mapping like {{atr: 2}} or {{percent: 1}}")
@@ -371,7 +409,8 @@ def strategy_from_dict(data: dict, sid: str = "", path: Path | None = None, raw_
     _check_keys(
         r,
         {"account_size", "risk_per_trade_pct", "point_value", "size_step", "min_size", "max_size",
-         "compound", "currency", "max_daily_loss_pct", "max_weekly_loss_pct", "max_drawdown_pct"},
+         "compound", "currency", "max_daily_loss_pct", "max_weekly_loss_pct", "max_drawdown_pct",
+         "size_currency", "market_currency", "fx_rate", "margin_pct", "max_margin_pct", "close_out_pct"},
         "risk",
     )
     # Built-in markets know their own point value, typical spread and funding; a blank uses those.
@@ -396,6 +435,7 @@ def strategy_from_dict(data: dict, sid: str = "", path: Path | None = None, raw_
         max_daily_loss_pct=_limit_pct(r, "max_daily_loss_pct"),
         max_weekly_loss_pct=_limit_pct(r, "max_weekly_loss_pct"),
         max_drawdown_pct=_limit_pct(r, "max_drawdown_pct"),
+        **_money_settings(r, builtin),
     )
     if risk.risk_per_trade_pct > 10:
         raise StrategyError("risk.risk_per_trade_pct above 10% is almost certainly a typo")

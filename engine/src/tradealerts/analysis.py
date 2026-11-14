@@ -343,10 +343,20 @@ def _exposure(per: list[dict], aligned: pd.DataFrame, open_events: list[tuple], 
 # --------------------------------------------------------------------------- portfolio: one shared account
 
 
+def _num_or(v, fallback: float) -> float:
+    """A trade field as a float, or ``fallback`` when it's missing (trades saved before it existed)."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return fallback
+    return v if math.isfinite(v) else fallback
+
+
 def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
                    weights: dict[str, float] | None = None, max_open_trades: int | None = None,
                    max_open_risk_pct: float | None = None, max_daily_loss_pct: float | None = None,
-                   max_weekly_loss_pct: float | None = None, max_drawdown_pct: float | None = None) -> dict:
+                   max_weekly_loss_pct: float | None = None, max_drawdown_pct: float | None = None,
+                   max_margin_pct: float | None = None) -> dict:
     """Replay every strategy's trades through one account, in the order they were entered.
 
     Unlike :func:`portfolio`, the balance compounds: each trade is sized from the account as it
@@ -354,8 +364,10 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
     trade is skipped when it would take the account past ``max_open_trades`` open at once or past
     ``max_open_risk_pct`` of the balance at risk to the stops, or while a loss limit is reached
     (``max_daily_loss_pct`` / ``max_weekly_loss_pct`` / ``max_drawdown_pct``, days and weeks in
-    UTC, see :mod:`limits`). Each trade's result scales with its new size against the backtest's
-    size; a trade the backtest sized at 0 stays at 0.
+    UTC, see :mod:`limits`), or when the margin held by open trades would pass ``max_margin_pct``
+    of the balance. Each trade's result and margin scale with its new size against the backtest's
+    size; a trade the backtest sized at 0 stays at 0. Sizes use the exchange rate the trade
+    opened at (``fx_entry``) for markets priced in another currency.
     """
     from . import limits
     from .risk import position_size
@@ -368,7 +380,9 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
         for row in res.trades.itertuples():
             rows.append({"sid": sid, "entry": pd.Timestamp(row.entry_time), "exit": pd.Timestamp(row.exit_time),
                          "entry_price": float(row.entry_price), "stop": float(row.stop), "size": float(row.size),
-                         "pnl": float(row.pnl), "risk_pct": r.risk_per_trade_pct * scale[sid], "risk": r})
+                         "pnl": float(row.pnl), "risk_pct": r.risk_per_trade_pct * scale[sid], "risk": r,
+                         "fx_entry": _num_or(getattr(row, "fx_entry", None), 1.0),
+                         "margin": _num_or(getattr(row, "margin", None), 0.0)})
     rows.sort(key=lambda x: (x["entry"], x["exit"]))
 
     equity = float(balance)
@@ -378,7 +392,9 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
                  "taken": 0, "skipped": 0, "pnl": 0.0, "win_rate_pct": None,
                  "direction": res.strategy.direction, "timeframe": res.strategy.market.timeframe,
                  "weight_pct": (weights[sid] if weights else 1.0 / n) * 100} for sid, name, res in parts}
-    skipped = {"open_trades": 0, "open_risk": 0, "too_small": 0, "daily_loss": 0, "weekly_loss": 0, "drawdown": 0}
+    skipped = {"open_trades": 0, "open_risk": 0, "too_small": 0, "daily_loss": 0, "weekly_loss": 0, "drawdown": 0,
+               "margin": 0}
+    peak_margin = 0.0
     caps = (max_daily_loss_pct, max_weekly_loss_pct, max_drawdown_pct)
     limited = any(x is not None for x in caps)
     track: dict = {}
@@ -410,19 +426,28 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
             continue
         r = tr["risk"]
         dist = abs(tr["entry_price"] - tr["stop"])
-        size = position_size(equity, tr["risk_pct"], dist, r.point_value, r.size_step, r.min_size, r.max_size)
+        size = position_size(equity, tr["risk_pct"], dist, r.point_value * tr["fx_entry"], r.size_step,
+                             r.min_size, r.max_size)
         if size <= 0:
             p["skipped"] += 1
             skipped["too_small"] += 1
             continue
-        risk_amount = dist * size * r.point_value
+        risk_amount = dist * size * r.point_value * tr["fx_entry"]
+        margin = tr["margin"] * size / tr["size"] if tr["size"] > 0 else 0.0
+        open_margin = sum(x["margin"] for x in open_) + margin
+        if max_margin_pct is not None and open_margin > equity * max_margin_pct / 100 + 1e-9 * max(1.0, abs(equity)):
+            p["skipped"] += 1
+            skipped["margin"] += 1
+            continue
         open_risk = sum(x["risk_amount"] for x in open_)
         if max_open_risk_pct is not None and equity > 0 and (open_risk + risk_amount) / equity * 100 > max_open_risk_pct + 1e-9:
             p["skipped"] += 1
             skipped["open_risk"] += 1
             continue
         pnl = tr["pnl"] * size / tr["size"] if tr["size"] > 0 else 0.0
-        open_.append({**tr, "size": size, "pnl": pnl, "risk_amount": risk_amount})
+        if margin and equity > 0:
+            peak_margin = max(peak_margin, open_margin / equity * 100)
+        open_.append({**tr, "size": size, "pnl": pnl, "risk_amount": risk_amount, "margin": margin})
         taken.append({"sid": tr["sid"], "pnl": pnl, "entry": tr["entry"], "exit": tr["exit"]})
         risk_events.append((tr["entry"], risk_amount, tr["sid"]))
         open_events.append((tr["entry"], 1, tr["sid"]))
@@ -486,6 +511,7 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
             "trades": len(taken),
             "trades_skipped": int(sum(skipped.values())),
             "max_open_risk_pct": float(open_risk_s.max()),
+            "max_margin_used_pct": peak_margin or None,
             "avg_open_risk_pct": float(open_risk_s[open_risk_s > 0].mean()) if (open_risk_s > 0).any() else 0.0,
             "time_with_risk_pct": float((open_risk_s > 0).mean() * 100),
             "max_open_trades": exposure["max_open_trades"],
@@ -535,6 +561,8 @@ def shuffled_market(df: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
         out["volume"] = df["volume"].to_numpy()[order]
     if "spread" in df.columns:
         out["spread"] = (df["spread"].to_numpy(dtype=float) / prev)[order] * new_prev
+    if "fx" in df.columns:  # exchange rates stay in time order: only the market's own path is random
+        out["fx"] = df["fx"].to_numpy()
     return out
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from .. import data as data_mod
+from .. import fxrates
 from ..backtest import lookback_for_start
 from ..workspace import Workspace
 from .common import err
@@ -55,6 +56,10 @@ def load_period(ctx, ws: Workspace, s, body: dict, end_at: pd.Timestamp | None =
     df = data_mod.closed_bars(df, m.timeframe)
     if df.empty or (test_start is not None and df.index[-1] < test_start):
         err(422, "No price data in that period")
+    try:
+        df = fxrates.attach(df, s, fxrates.loader(c, ctx.cache))
+    except data_mod.DataError as exc:
+        err(422, str(exc))
     notes = data_mod.data_notes(m.symbol, m.provider, c.data)
     if test_start is not None and df.index[0] > test_start + pd.Timedelta(days=7):
         asked = f"the last {years:g} year{'s' if years != 1 else ''}" if years else f"from {test_start:%d %b %Y}"
