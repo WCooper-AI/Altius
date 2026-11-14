@@ -41,7 +41,7 @@ def backtest(request: Request, body: dict = Body(...), ws: Workspace = Depends(w
     df, fine, test_start, notes = load_period(ctx_of(request), ws, s, body)
     out = _run(request, ws, compute.backtest, body["data"], df, fine, test_start, notes,
                None if split is None else float(split))
-    out["meta"] = stamp(ws, s, body, out["metrics"])
+    out["meta"] = stamp(ws, s, body, out["metrics"], out)
     return out
 
 
@@ -65,8 +65,11 @@ def count_signals(request: Request, body: dict = Body(...), ws: Workspace = Depe
 SOURCE_NAMES = {"dukascopy": "Dukascopy", "yahoo": "Yahoo Finance", "oanda": "OANDA", "csv": "CSV file"}
 
 
-def stamp(ws: Workspace, s, body: dict, metrics: dict) -> dict:
-    """Everything needed to run the same backtest again and get the same answer."""
+def stamp(ws: Workspace, s, body: dict, metrics: dict, out: dict | None = None) -> dict:
+    """Everything needed to run the same backtest again and get the same answer.
+    ``out`` (the backtest's own result) adds the data fingerprint and data checks."""
+    out = out or {}
+    r = s.risk
     version = None
     sid = body.get("strategy_id")
     if isinstance(sid, str) and ID_RE.match(sid):
@@ -90,6 +93,19 @@ def stamp(ws: Workspace, s, body: dict, metrics: dict) -> dict:
         "funding_pct": s.funding_pct,
         "slippage": s.slippage,
         "slippage_pct": s.slippage_pct,
+        "commission": s.commission,
+        "commission_pct": s.commission_pct,
+        "borrow_pct": s.borrow_pct,
+        "direction": s.direction,
+        "risk": {"account_size": r.account_size, "risk_per_trade_pct": r.risk_per_trade_pct,
+                 "point_value": r.point_value, "size_step": r.size_step, "min_size": r.min_size,
+                 "max_size": r.max_size, "compound": r.compound, "currency": r.currency},
+        "split_pct": metrics.get("split_pct"),
+        "used_finer_candles": metrics.get("used_finer_candles"),
+        "random_seed": analysis.SEED,
+        "data_fingerprint": out.get("data_fingerprint"),
+        "data_candles": out.get("data_candles"),
+        "data_checks": (out.get("data_quality") or {}).get("counts"),
         "tested_at": now_iso(),
     }
 

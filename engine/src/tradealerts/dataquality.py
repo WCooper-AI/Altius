@@ -4,10 +4,18 @@
 gaps (missing candles), timestamps out of order, a stale last bar (the feed stopped),
 and zero-volume or flat candles (the feed filled in a price without any trading behind
 it). It never raises: bad input just means no warnings.
+
+`report(df, timeframe)` is the fuller record kept with every backtest: the checks above
+(except staleness, which only matters live), plus unusual jumps between candles,
+candles closer together than the candle size, the time zone, how many candles had a
+spread in the data, and a fingerprint of the prices so the same data can be recognised.
 """
 
 from __future__ import annotations
 
+import hashlib
+
+import numpy as np
 import pandas as pd
 
 from . import timeframes
@@ -144,4 +152,58 @@ def check(df: pd.DataFrame, timeframe: str, now=None, symbol: str = "") -> list[
         out.append({"kind": "repaired", "count": repaired,
                     "text": (f"{repaired} candle{'s' if repaired != 1 else ''} had a high below the open, close or low "
                              "(or a low above them) and were widened to fit. The source data has bad ticks there.")})
+    return out
+
+
+def fingerprint(df: pd.DataFrame) -> str:
+    """A short code for the candles themselves (times, prices and any spread): the same
+    data gives the same code on any machine, and any changed candle gives a new one."""
+    h = hashlib.sha256()
+    if df is None or not len(df):
+        return h.hexdigest()[:16]
+    idx = df.index.tz_convert("UTC") if getattr(df.index, "tz", None) is not None else df.index
+    h.update(np.ascontiguousarray(idx.as_unit("ns").asi8).tobytes())
+    cols = [c for c in ("open", "high", "low", "close", "spread") if c in df.columns]
+    h.update(",".join(cols).encode())
+    values = np.ascontiguousarray(df[cols].to_numpy(dtype=float))
+    h.update(np.where(np.isnan(values), 0.0, values).tobytes())  # one form of "missing"
+    return h.hexdigest()[:16]
+
+
+def report(df: pd.DataFrame, timeframe: str, symbol: str = "") -> dict:
+    """The data-quality record for one backtest period (see the module notes)."""
+    out: dict = {"candles": 0 if df is None else int(len(df)), "issues": [], "counts": {},
+                 "fingerprint": fingerprint(df), "timezone": None, "spread_coverage_pct": None}
+    if df is None or len(df) < 2 or not isinstance(df.index, pd.DatetimeIndex):
+        return out
+    bar = timeframes.to_timedelta(timeframe)
+    out["start"], out["end"] = df.index[0].isoformat(), df.index[-1].isoformat()
+    tz = df.index.tz
+    out["timezone"] = str(tz) if tz is not None else None
+    issues = check(df, timeframe, now=df.index[-1] + bar, symbol=symbol)  # past data: never "stale"
+    if tz is None:
+        issues.append({"kind": "timezone", "count": len(df),
+                       "text": "The candle times carry no time zone, so they were read as UTC."})
+    steps = pd.Series(df.index[1:] - df.index[:-1])
+    close = int(((steps > pd.Timedelta(0)) & (steps < bar)).sum())
+    if close:
+        issues.append({"kind": "frequency", "count": close,
+                       "text": (f"{close} candle{'s' if close != 1 else ''} start less than one candle size "
+                                f"({timeframe}) after the one before. The data may mix candle sizes there.")})
+    from .data import find_jumps
+    jumps = find_jumps(df, timeframe)
+    if len(jumps):
+        worst = jumps["gap"].idxmax()
+        issues.append({"kind": "jump", "count": int(len(jumps)),
+                       "text": (f"{len(jumps)} unusual jump{'s' if len(jumps) != 1 else ''} between candles, the "
+                                f"largest on {_fmt(worst)} UTC. Often a futures roll or a bad tick.")})
+    if "spread" in df.columns:
+        pct = float(df["spread"].notna().mean() * 100)
+        out["spread_coverage_pct"] = pct
+        if 0 < pct < 100:
+            issues.append({"kind": "spread", "count": int(df["spread"].isna().sum()),
+                           "text": (f"The data has a spread for {pct:.0f}% of candles; the others use the "
+                                    "strategy's spread setting.")})
+    out["issues"] = issues
+    out["counts"] = {i["kind"]: i["count"] for i in issues}
     return out

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import __version__
+from . import __version__, dataquality
 from . import data as data_mod
 from .backtest import run_backtest
 from .config import AppConfig, ConfigError
@@ -122,9 +122,8 @@ def cmd_validate(args) -> int:
     return 0 if ok else 1
 
 
-def cmd_backtest(args) -> int:
-    cfg = load_config(args.config)
-    s = load_strategy(args.strategy)
+def _period_data(args, cfg, s):
+    """The candles a backtest of ``s`` uses with these options: (df, fine, start, notes)."""
     notes = []
     if args.data:
         raw = data_mod.CSVProvider(tz=args.tz).load(args.data)
@@ -147,12 +146,42 @@ def cmd_backtest(args) -> int:
         start = pd.Timestamp(args.start, tz="UTC")
     if args.end:
         df = df[df.index < pd.Timestamp(args.end, tz="UTC")]
-    df = data_mod.closed_bars(df, s.market.timeframe)
+    return data_mod.closed_bars(df, s.market.timeframe), fine, start, notes
+
+
+def cmd_check_data(args) -> int:
+    """Print the data checks for the period a backtest would use. Exit code 1 if anything was found."""
+    cfg = load_config(args.config)
+    s = load_strategy(args.strategy)
+    df, _fine, start, _notes = _period_data(args, cfg, s)
+    period = df if start is None else df[df.index >= start]
+    if period.empty:
+        print("No data in that range.", file=sys.stderr)
+        return 1
+    rep = dataquality.report(period, s.market.timeframe, s.market.symbol)
+    print(f"{s.market.label} {s.market.timeframe}: {rep['candles']} candles, {rep['start']} to {rep['end']} "
+          f"(time zone {rep['timezone'] or 'none'})")
+    print(f"Fingerprint {rep['fingerprint']}")
+    if rep["spread_coverage_pct"] is not None:
+        print(f"Spread in the data for {rep['spread_coverage_pct']:.0f}% of candles")
+    for i in rep["issues"]:
+        print(f"- {i['text']}")
+    if not rep["issues"]:
+        print("Nothing unusual found.")
+    return 1 if rep["issues"] else 0
+
+
+def cmd_backtest(args) -> int:
+    cfg = load_config(args.config)
+    s = load_strategy(args.strategy)
+    df, fine, start, notes = _period_data(args, cfg, s)
     if df.empty or (start is not None and df.index[-1] < start):
         print("No data in that range.", file=sys.stderr)
         return 1
     res = run_backtest(s, df, fine, notes=notes, start=start)
     print(format_summary(res))
+    print(f"Price data fingerprint {dataquality.fingerprint(df)} ({len(df)} candles, warm-up included), "
+          f"engine {__version__}")
     if args.luck:
         from .analysis import luck_check
         print("\nLuck check (resampled trades, both halves, random price paths)...")
@@ -349,6 +378,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--freq", default="1h")
     s.add_argument("--seed", type=int, default=7)
     s.set_defaults(func=cmd_sample_data)
+
+    s = sub.add_parser("check-data", help="check the price data a strategy's backtest would use")
+    s.add_argument("strategy")
+    s.add_argument("--data", help="CSV of bars instead of the strategy's data provider")
+    s.add_argument("--tz", default="UTC", help="time zone of naive CSV timestamps")
+    s.add_argument("--years", type=float, help="check the last N years, e.g. 5")
+    s.add_argument("--from", dest="start", help="start date, e.g. 2025-01-01")
+    s.add_argument("--to", dest="end", help="end date (exclusive)")
+    s.set_defaults(func=cmd_check_data)
     return p
 
 

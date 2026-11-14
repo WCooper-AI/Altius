@@ -83,7 +83,8 @@ def test_downloads_are_cached_and_only_new_candles_fetched(tmp_path):
     p, fake = provider(tmp_path)
     first, _ = p.fetch_bars("E_SandP-500", "1h", 300)
     first_calls = len(fake.calls)
-    assert len(list(tmp_path.glob("dukascopy_E_SandP_500_*.csv.gz"))) >= 2  # bid and ask
+    assert len(list(tmp_path.glob("dukascopy_E_SandP_500_*.parquet" if data_mod.PARQUET else
+                                  "dukascopy_E_SandP_500_*.csv.gz"))) >= 2  # bid and ask
     fake.calls.clear()
     second, _ = p.fetch_bars("E_SandP-500", "1h", 300)
     assert len(second) == pytest.approx(len(first), abs=2)
