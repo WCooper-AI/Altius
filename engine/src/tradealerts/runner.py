@@ -123,7 +123,7 @@ def ensure_run(store: StateStore, strategy: Strategy, now=None) -> dict | None:
             currency=strategy.risk.currency,
             start_balance=rec["state"]["equity"] if rec else strategy.risk.account_size,
             started_at=_utc(now).isoformat(timespec="seconds"), keep_state=rec is not None,
-            source_hash=versions.text_hash(text), strategy_yaml=text,
+            source_hash=versions.text_hash(text), strategy_yaml=text, if_none=True,
         )
     elif run is not None and text:
         versions.sync_run(store, run, text, _utc(now).isoformat(timespec="seconds"))

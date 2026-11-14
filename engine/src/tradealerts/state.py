@@ -221,21 +221,36 @@ class StateStore:
 
     def start_run(self, strategy_id: str, *, name: str, market: str, timeframe: str, currency: str,
                   start_balance: float, started_at: str | None = None, keep_state: bool = False,
-                  source_hash: str = "", strategy_yaml: str = "") -> dict:
-        """Start a new forward test. Any running one for the strategy is finished first.
+                  source_hash: str = "", strategy_yaml: str = "", if_none: bool = False) -> dict:
+        """Start a new forward test. Any running one for the strategy is finished first,
+        unless ``if_none`` is true, in which case an existing active run is returned as-is.
 
         ``source_hash`` and ``strategy_yaml`` are the strategy file it runs on, kept with the run
         so it can be re-tested later even if the strategy is edited or deleted."""
-        self.stop_run(strategy_id, stopped_at=started_at)
-        if not keep_state:
-            self.db.execute("DELETE FROM strategy_state WHERE strategy_id = ?", (strategy_id,))
-        cur = self.db.execute(
-            "INSERT INTO runs (strategy_id, name, market, timeframe, currency, start_balance, started_at, "
-            "source_hash, strategy_yaml) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (strategy_id, name, market, timeframe, currency, start_balance, started_at or _now(),
-             source_hash or None, strategy_yaml or None),
-        )
-        self.db.commit()
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            existing = self.active_run(strategy_id)
+            if if_none and existing is not None:
+                self.db.rollback()
+                return existing
+            if existing is not None:
+                self.db.execute(
+                    "UPDATE runs SET stopped_at = ? WHERE id = ?",
+                    (started_at or _now(), existing["id"]),
+                )
+                self.db.execute("DELETE FROM strategy_state WHERE strategy_id = ?", (strategy_id,))
+            if not keep_state:
+                self.db.execute("DELETE FROM strategy_state WHERE strategy_id = ?", (strategy_id,))
+            cur = self.db.execute(
+                "INSERT INTO runs (strategy_id, name, market, timeframe, currency, start_balance, started_at, "
+                "source_hash, strategy_yaml) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (strategy_id, name, market, timeframe, currency, start_balance, started_at or _now(),
+                 source_hash or None, strategy_yaml or None),
+            )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
         return self.run(cur.lastrowid)
 
     def stop_run(self, strategy_id: str, stopped_at: str | None = None) -> dict | None:
