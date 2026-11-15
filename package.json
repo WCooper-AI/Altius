@@ -1,0 +1,13 @@
+{
+  "name": "trading-alerts-lint",
+  "private": true,
+  "description": "Lint tools for the interface's JavaScript (no build step; the browser loads static/*.js as they are).",
+  "scripts": {
+    "lint:js": "eslint engine/src/tradealerts/static selfhost/desktop/splash engine/tests/js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0"
+  }
+}

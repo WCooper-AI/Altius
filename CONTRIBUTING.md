@@ -2,7 +2,7 @@
 
 Thanks for helping. Bug reports and pull requests are welcome.
 
-- Run `pytest engine/tests` before sending a change, and add a test for any bug you fix.
+- Run `pytest engine/tests` before sending a change, and add a test for any bug you fix. If you changed the interface's JavaScript, also run `npm ci && npm run lint:js` from the repo root.
 - The web interface is plain JavaScript with no build step (`engine/src/tradealerts/static/`).
 - Keep wording in the interface plain and free of jargon; the app is for beginners too.
 

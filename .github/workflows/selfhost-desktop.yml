@@ -1,7 +1,7 @@
 # Builds the self-hosted desktop app (with the engine inside) for Windows, macOS and Linux.
 # Run it from the Actions tab, or push a tag like v0.2.0. The installers appear as downloads on the run.
 # On a v* tag, the "release" job also attaches the Linux .deb / .AppImage and the self-hosted zip
-# (scripts/release.py) to the GitHub Release. Windows and macOS builds are not attached until
+# (scripts/release.py) and a CycloneDX SBOM to the GitHub Release. Windows and macOS builds are not attached until
 # they're signed (launch decision, 13 Nov 2026); they stay downloadable from the run.
 name: Desktop app (self-hosted)
 
@@ -9,6 +9,9 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+
+permissions:
+  contents: read   # the release job asks for write itself
 
 jobs:
   build:
@@ -119,6 +122,15 @@ jobs:
       - name: Self-hosted zip
         run: python scripts/release.py
 
+      # SBOM: every Python package the shipped engine installs (Docker and desktop extras), as CycloneDX JSON.
+      # The tool runs from its own venv so it isn't listed itself.
+      - name: Software bill of materials
+        run: |
+          python -m venv /tmp/engine && /tmp/engine/bin/pip install -q "./engine[yahoo,parquet,keychain]"
+          python -m venv /tmp/sbom && /tmp/sbom/bin/pip install -q cyclonedx-bom
+          /tmp/sbom/bin/cyclonedx-py environment --pyproject engine/pyproject.toml --of JSON --output-reproducible \
+            -o "dist/trading-alerts-${GITHUB_REF_NAME}-sbom.cdx.json" /tmp/engine/bin/python
+
       - uses: actions/download-artifact@v4
         with:
           name: trading-alerts-selfhosted-ubuntu-22.04
@@ -130,5 +142,6 @@ jobs:
           fail_on_unmatched_files: false
           files: |
             dist/trading-alerts-selfhosted-*.zip
+            dist/trading-alerts-*-sbom.cdx.json
             linux/**/*.deb
             linux/**/*.AppImage
