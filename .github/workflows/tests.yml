@@ -19,6 +19,18 @@ jobs:
       - run: pip install ruff
       - run: ruff check engine/
 
+  # The interface's ES modules: a missing import only fails in the browser, so ESLint (no-undef) catches it here.
+  lint-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint:js
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -33,4 +45,41 @@ jobs:
           cache: pip
           cache-dependency-path: engine/pyproject.toml
       - run: pip install -e "engine[dev,yahoo]"
+      - name: Tests (with coverage on 3.12)
+        if: matrix.python-version == '3.12'
+        working-directory: engine
+        run: |
+          pytest -q --cov --cov-report=xml --cov-report=term
+          coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+      - name: Tests
+        if: matrix.python-version != '3.12'
+        run: pytest engine/tests -q
+      - uses: actions/upload-artifact@v4
+        if: matrix.python-version == '3.12'
+        with:
+          name: coverage
+          path: engine/coverage.xml
+
+  # Windows and macOS: a normal (not editable) install, so the tests also check the packaged files.
+  test-os:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: engine/pyproject.toml
+      - run: pip install "./engine[dev,yahoo]"
+      - run: tradealerts --version
       - run: pytest engine/tests -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/docker-smoke.sh

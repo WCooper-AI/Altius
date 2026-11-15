@@ -9,7 +9,6 @@ import { viewStrategies } from "./strategies.js";
 import { lineChart, periodPicker, pref, savePref } from "./testing.js";
 import { undoable } from "./settings.js";
 import { candleChart, every } from "./widgets.js";
-import { hh } from "./markets.js";
 import { journalDialog } from "./journal.js";
 import { untilText } from "./news.js";
 import { refreshStatus, setNav, toggleRunnerPanel } from "./boot.js";
@@ -63,7 +62,7 @@ function runCard(run, onChange, { chartHeight = 96 } = {}) {
       h("span", { class: "inline" }, h("a", { class: "button small", href: "#/run/" + run.id }, "Details"), stop)));
 }
 
-function comingUp(dash, newsRes, startable, pick) {
+function comingUp(dash, newsRes) {
   const st = (app.status && app.status.runner) || {};
   const news = ((newsRes && newsRes.events) || [])
     .filter((e) => (e.impact === "high" || e.impact === "medium") && new Date(e.time) > Date.now()).slice(0, 4);
@@ -289,10 +288,6 @@ export async function viewDashboard() {
       const before = (r.series || []).filter((p) => new Date(p[0]) <= dayAgo).pop();
       today += r.balance - (before ? before[1] : r.start_balance);
     }
-    const nextNews = newsRes && newsRes.events.find((e) => e.impact === "high" && new Date(e.time) > Date.now());
-    const st = app.status && app.status.runner;
-    const nextCheck = st && st.next_run ? hhmm(st.next_run) : null;
-    const newsText = nextNews ? `${untilText(nextNews.time).replace(/^in /, "")} until ${nextNews.currency} ${nextNews.title}` : "no big news this week";
     const bits = [];
     if (one) bits.push(h("span", {}, "Paper balance ", h("strong", { class: "num" }, money(total, one))));
     if (one) bits.push(h("span", {}, "Last 24 hours ", h("strong", { class: "num " + (today >= 0 ? "gain" : "loss") }, signedMoney(today, one))));
@@ -305,7 +300,7 @@ export async function viewDashboard() {
     const grid = h("div", { class: "run-grid" + (few ? " few-" + n : "") },
       dash.running.map((r) => runCard(r, viewDashboard, { chartHeight: n === 1 ? 170 : few ? 130 : 96 })));
     // With only a card or two there's a lot of empty space, so fill it with what's coming up.
-    if (few || n % 3) grid.appendChild(comingUp(dash, newsRes, startable, pick));
+    if (few || n % 3) grid.appendChild(comingUp(dash, newsRes));
     append(page, [grid]);
   } else {
     append(page, [h("div", { class: "panel" }, h("div", { class: "empty" }, h("h2", {}, "No forward tests running"),

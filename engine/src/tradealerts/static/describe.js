@@ -120,7 +120,7 @@ export function describeCondition(c, nested = false) {
   return ["?"];
 }
 
-function describeLevel(spec, which) {
+function describeLevel(spec) {
   if (!spec) return null;
   if ("atr" in spec) {
     return [V(spec.atr, (x) => short(x) + "×"), " the typical candle size away (ATR over ", V(spec.atr_period), " candles)"];
@@ -145,9 +145,9 @@ export function describeStrategy(d) {
     ", checking ", tf ? M(EVERY[tf] || `${tf} candles`) : B("how often?"), ", when ", ...describeCondition(d.entry || {}), ". ",
   ];
   const ex = d.exit || {};
-  const stop = describeLevel(ex.stop, "stop");
+  const stop = describeLevel(ex.stop);
   parts.push("Stop loss ", ...(stop || [B("not chosen")]));
-  const target = describeLevel(ex.target, "target");
+  const target = describeLevel(ex.target);
   if (target) parts.push(", target ", ...target);
   if (ex.max_bars) parts.push(", close after ", M(ex.max_bars), " bars");
   if (ex.when) parts.push(", or exit when ", ...describeCondition(ex.when));
@@ -224,7 +224,6 @@ export function statusOf(d) {
 }
 const STATUS_TEXT = { draft: "Draft", live: "Alerts on", paused: "Paused" };
 export function pill(status, text) { return h("span", { class: `pill ${status}` }, text || STATUS_TEXT[status]); }
-function problemOf(sid) { return (((app.status || {}).runner || {}).problems || {})[sid] || null; }
 export const hhmm = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 export function reopenText(t) {
   const d = new Date(t);

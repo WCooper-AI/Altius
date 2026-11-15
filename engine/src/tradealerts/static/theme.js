@@ -15,5 +15,5 @@
       root.style.setProperty("--accent", a.accent);
       if (a.ink) root.style.setProperty("--accent-ink", a.ink);
     }
-  } catch (e) { /* storage unavailable: defaults apply */ }
+  } catch { /* storage unavailable: defaults apply */ }
 })();

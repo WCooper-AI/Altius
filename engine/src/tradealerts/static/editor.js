@@ -129,7 +129,6 @@ function conditionRow(getRaw, setRaw, onChange, onRemove, pos = null) {
   }
   const negated = isNegatedLeaf(raw);
   const get = negated ? () => getRaw().not : getRaw;
-  const set = negated ? (v) => { getRaw().not = v; } : setRaw;
   const notBtn = h("button", { class: "quiet not-toggle", type: "button", "aria-pressed": String(negated),
     title: negated ? "Switch back to a plain condition" : "Require this to be false", onclick: () => {
       setRaw(negated ? getRaw().not : { not: getRaw() });

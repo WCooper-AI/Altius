@@ -1,0 +1,36 @@
+# Weekly update pull requests, one grouped PR per ecosystem, so tests run against each bump before it lands.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /engine
+    schedule: {interval: weekly}
+    groups:
+      python: {patterns: ["*"]}
+
+  - package-ecosystem: npm            # ESLint (CI only; the interface has no build step)
+    directory: /
+    schedule: {interval: weekly}
+    groups:
+      lint: {patterns: ["*"]}
+
+  - package-ecosystem: npm            # Tauri CLI for the desktop app
+    directory: /selfhost/desktop
+    schedule: {interval: weekly}
+    groups:
+      desktop-npm: {patterns: ["*"]}
+
+  - package-ecosystem: cargo
+    directory: /selfhost/desktop/src-tauri
+    schedule: {interval: weekly}
+    groups:
+      desktop-cargo: {patterns: ["*"]}
+
+  - package-ecosystem: docker
+    directory: /selfhost
+    schedule: {interval: weekly}
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+    groups:
+      actions: {patterns: ["*"]}

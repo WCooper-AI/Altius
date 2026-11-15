@@ -280,7 +280,7 @@ export async function viewEditor(id, exampleName, preloaded, run) {
       const r = await POST("/validate", { data: exportData() });
       validity.className = "validity " + (r.ok ? "ok" : "bad");
       validity.textContent = r.ok ? "Rules check out." : r.error;
-    } catch (e) { /* shown elsewhere */ }
+    } catch { /* shown elsewhere */ }
   }
   function exportData() {
     const d = clone(data);

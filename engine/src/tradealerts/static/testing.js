@@ -573,7 +573,6 @@ function optionLabel(setting, v) {
 }
 
 function renderSweep(res, setting, onUse) {
-  const sym = res.currency;
   const rows = res.rows;
   const ok = rows.filter((r) => !r.error);
   const box = h("div", { class: "sweep" });
@@ -607,7 +606,7 @@ function renderSweep(res, setting, onUse) {
         onUse ? h("td", { class: "num" }, r.value === setting.current ? null : h("button", { type: "button", class: "quiet",
           onclick: (e) => { onUse(r.value); e.target.closest("tbody").querySelectorAll("tr").forEach((tr) => tr.classList.remove("current")); e.target.closest("tr").classList.add("current"); e.target.remove(); } }, "Use")) : null))));
   append(box, [h("div", { class: "table-wrap" }, table)]);
-  if (res.walk_forward) append(box, [stageTag("robust"), renderWalkForward(res.walk_forward, setting, sym)]);
+  if (res.walk_forward) append(box, [stageTag("robust"), renderWalkForward(res.walk_forward, setting)]);
   append(box, [
     h("p", { class: "notice" }, "Careful: the value that did best on past prices is usually luckier than it looks, because you picked it after seeing the results. " +
       "Prefer a value whose neighbours also did well, check it was profitable in both halves, then run the luck check on it."),
@@ -615,7 +614,7 @@ function renderSweep(res, setting, onUse) {
   return box;
 }
 
-function renderWalkForward(wf, setting, sym) {
+function renderWalkForward(wf, setting) {
   const gap = wf.hindsight_pct - wf.walk_forward_pct;
   let verdict;
   if (wf.walk_forward_pct <= 0) verdict = "Tuning as you went would have lost money, so the good results above depend on knowing the best value in advance.";
@@ -849,11 +848,10 @@ export function renderBacktest(res) {
   };
   drawEquity();
   // price chart: click a trade (row or marker) to zoom in on it
-  let chart = null, details = null, stepper = null, current = -1;
+  let chart = null, details = null, stepper = null;
   const rowsById = [];
   const showTrade = (k) => {
     if (!chart || k < 0 || k >= res.trades.length) return;
-    current = k;
     const t = res.trades[k];
     details.open = true;
     chart.focus(t);
@@ -868,7 +866,7 @@ export function renderBacktest(res) {
       h("span", { class: "small" }, h("strong", {}, `Trade ${k + 1} of ${res.trades.length}`), ` · `,
         h("span", { class: t.pnl >= 0 ? "gain" : "loss" }, `${money(t.pnl, sym)} (${signed(t.r_multiple, "R", 1)})`), ` · ${hold}${exc}${why}`),
       h("button", { type: "button", class: "small", disabled: k === res.trades.length - 1, onclick: () => showTrade(k + 1), "aria-label": "Next trade" }, "Next ›"),
-      h("button", { type: "button", class: "quiet small", onclick: () => { current = -1; chart.clearFocus(); clear(stepper); rowsById.forEach((tr) => tr.classList.remove("selected")); } }, "Show all"),
+      h("button", { type: "button", class: "quiet small", onclick: () => { chart.clearFocus(); clear(stepper); rowsById.forEach((tr) => tr.classList.remove("selected")); } }, "Show all"),
     ]);
     details.scrollIntoView({ block: "nearest", behavior: "smooth" });
   };
