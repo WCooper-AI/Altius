@@ -835,6 +835,13 @@ details[open] > :not(summary) { animation: rise .3s var(--ease) backwards; }
 .walk { display: grid; gap: .5rem; padding: 1rem; border-radius: var(--radius); background: var(--glass-thin); border: 1px solid var(--line-soft); }
 .walk h3 { display: flex; align-items: center; }
 .walk.split { margin: 0 0 1rem; }
+.regimes .group-row th { text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding-top: .6rem; }
+
+/* What kind of evidence a result is (stageTag in util.js). Colours only tell the stages apart; none of them means good or bad. */
+.stage-tag { margin: 0 0 .75rem; padding: .2rem 0 .2rem .7rem; border-left: 3px solid var(--muted); font-size: var(--step--1); max-width: 80ch; }
+.stage-tag strong { margin-right: .3rem; }
+.stage-robust { border-left-color: var(--accent); }
+.stage-forward { border-left-color: var(--ink); }
 table.split-table { border-collapse: collapse; font-size: var(--step--1); white-space: nowrap; }
 table.split-table th, table.split-table td { padding: .3rem .6rem; border-bottom: 1px solid var(--line-soft); }
 table.split-table th { color: var(--muted); font-weight: 580; text-align: left; }

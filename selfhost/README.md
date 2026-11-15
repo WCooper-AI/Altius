@@ -75,9 +75,14 @@ Experienced users can choose **Build from scratch** for the full rule builder.
   you when you may be picking the luckiest value.
 - **Train/test split.** Keep 10–50% of the history back on any backtest and see the
   results on data the settings never saw.
-- **Luck check.** Is a backtest's profit real or luck? Resamples the trades thousands
-  of times, checks both halves of the period, and runs the rules on random price
-  paths built from the market's own candles.
+- **Luck check.** Is a backtest's profit real or luck? Resamples runs of consecutive
+  trades thousands of times (block bootstrap), checks both halves of the period, runs
+  the rules on up to 200 random price paths built from the market's own candles (with
+  a 95% range on the share beaten), gives a deflated Sharpe ratio for the number of
+  settings you tried, and splits the trades by rising/falling and calm/busy markets.
+- **Optimiser checks.** Besides hold-out and walk-forward, every optimiser run reports
+  the probability of backtest overfitting (8 stretches, 70 splits) and the top
+  combination's deflated Sharpe ratio.
 - **Live-vs-backtest range check.** Shows whether a forward test sits below, within or
   above the range the strategy's own backtest produced over stretches of the same
   length. Positions, not a score.

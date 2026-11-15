@@ -221,8 +221,21 @@ def sweep_settings(request: Request, body: dict = Body(...), ws: Workspace = Dep
 @router.post("/api/luck")
 def luck(request: Request, body: dict = Body(...), ws: Workspace = Depends(workspace)):
     s = validate(ws, body.get("data"))
+    trials = _trials(body.get("trials"))
     df, fine, test_start, notes = load_period(ctx_of(request), ws, s, body)
-    return _run(request, ws, compute.luck, body["data"], df, fine, test_start, notes)
+    return _run(request, ws, compute.luck, body["data"], df, fine, test_start, notes, trials)
+
+
+MAX_TRIALS = 1_000_000
+
+
+def _trials(v) -> int:
+    """Settings or versions tried before this one: blank means 1."""
+    if v is None:
+        return 1
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not float(v).is_integer() or not 1 <= v <= MAX_TRIALS:
+        err(422, f"Settings tried must be a whole number from 1 to {MAX_TRIALS:,}")
+    return int(v)
 
 
 @router.post("/api/portfolio")

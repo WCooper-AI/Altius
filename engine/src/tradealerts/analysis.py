@@ -20,7 +20,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from . import timeframes
+from . import stats, timeframes
 from .backtest import BacktestResult, run_backtest
 from .strategy import Strategy
 
@@ -28,6 +28,8 @@ N_RESAMPLES = 5000
 N_SHUFFLES = 2000
 SEED = 0  # random draws (trade shuffles) start here, so the same backtest gives the same ranges
 MIN_TRADES = 30
+MAX_RANDOM = 200  # random markets in a luck check, if the time budget allows
+MIN_RANDOM = 20
 
 
 # --------------------------------------------------------------------------- shared
@@ -643,7 +645,9 @@ def next_step(check: "_Check") -> str | None:
 
 
 def luck_check(strategy: Strategy, df: pd.DataFrame, fine: pd.DataFrame | None, start: pd.Timestamp | None,
-               time_budget: float = 40.0, max_random: int = 40, seed: int = 0) -> dict:
+               time_budget: float = 40.0, max_random: int = MAX_RANDOM, seed: int = 0, trials: int | None = None) -> dict:
+    """``trials``: how many versions or settings were tried before this one (blank = 1), used
+    to deflate the Sharpe ratio for picking the best of several tries."""
     rng = np.random.default_rng(seed)
     t0 = time.monotonic()
     res = run_backtest(strategy, df, fine, start=start)
@@ -676,16 +680,16 @@ def luck_check(strategy: Strategy, df: pd.DataFrame, fine: pd.DataFrame | None, 
     # 3. resample the trades
     if n >= 5:
         r = trades["r_multiple"].to_numpy(dtype=float)
-        idx = rng.integers(0, n, (N_RESAMPLES, n))
-        means = r[idx].mean(axis=1)
+        means, block = stats.block_means(r, N_RESAMPLES, rng)
         p = float((means <= 0).mean())
         lo, hi = np.percentile(means, [5, 95])
         out["resample"] = {"p_losing": p, "avg_r": float(r.mean()), "avg_r_low": float(lo), "avg_r_high": float(hi),
-                           "runs": N_RESAMPLES}
+                           "runs": N_RESAMPLES, "block": block}
         checks.append(_Check(
             "resample", p < 0.05,
             f"Lost money in {p:.1%} of {N_RESAMPLES:,} reshuffled trade sets",
-            "Draws the same number of trades at random from this backtest's trades, thousands of times. "
+            f"Builds new trade lists from runs of {block} consecutive trade{'s' if block != 1 else ''} picked at random from this "
+            "backtest, thousands of times, so winning and losing streaks stay together. "
             "If many of those sets lose money, the profit leans on a handful of trades. Under 5% passes.",
         ))
         # trade order: how bad could the drawdown have been with the same trades in another order?
@@ -698,7 +702,7 @@ def luck_check(strategy: Strategy, df: pd.DataFrame, fine: pd.DataFrame | None, 
     coarse = res if fine is None or fine.empty else run_backtest(strategy, df, None, start=start)
     real = coarse.metrics["total_return_pct"]
     one = max(0.05, time.monotonic() - t0)
-    target = int(min(max_random, max(8, (time_budget - (time.monotonic() - t0)) / max(one / 2, 0.01))))
+    target = int(min(max_random, max(MIN_RANDOM, (time_budget - (time.monotonic() - t0)) / max(one / 2, 0.01))))
     randoms = []
     deadline = time.monotonic() + max(5.0, time_budget - (time.monotonic() - t0))
     while len(randoms) < target and (len(randoms) < 5 or time.monotonic() < deadline):
@@ -711,15 +715,24 @@ def luck_check(strategy: Strategy, df: pd.DataFrame, fine: pd.DataFrame | None, 
         arr = np.array(randoms)
         beaten = int((arr < real).sum())
         share = beaten / len(arr)
+        low, high = stats.wilson(beaten, len(arr))
+        p5, p95 = (float(x) for x in np.percentile(arr, [5, 95]))
         out["random"] = {"real": real, "returns": [float(x) for x in arr], "beaten": beaten, "runs": len(arr),
-                         "median": float(np.median(arr))}
+                         "median": float(np.median(arr)), "share": share, "share_low": low, "share_high": high,
+                         "p_value": float(((arr >= real).sum() + 1) / (len(arr) + 1)), "p5": p5, "p95": p95}
         checks.append(_Check(
             "random", share >= 0.9,
-            f"Beat {beaten} of {len(arr)} random markets",
+            f"Beat {beaten} of {len(arr)} random markets ({share:.0%}; 95% range {low:.0%} to {high:.0%})",
             "Runs the same rules on made-up price paths built from this market's own candles in a random order: "
             "same ups and downs and the same overall drift, but no real patterns. If the rules do about as well on "
-            "those, the result probably came from the market's drift or chance rather than the idea. Beating 90% passes.",
+            "those, the result probably came from the market's drift or chance rather than the idea. Beating 90% passes. "
+            f"The range is where the share would likely land with many more random markets; the middle 90% of their "
+            f"returns ran from {_pct(p5)} to {_pct(p95)}.",
         ))
+
+    # information only, no pass or fail: the Sharpe ratio allowing for tries, and market conditions
+    out["deflated"] = stats.deflated_sharpe(stats.trade_returns(trades), trials or 1)
+    out["regimes"] = stats.regimes(df, trades, start)
 
     out["checks"] = [c.public() for c in checks]
     decided = [c for c in checks if c.passed is not None]
@@ -728,6 +741,10 @@ def luck_check(strategy: Strategy, df: pd.DataFrame, fine: pd.DataFrame | None, 
     out["profitable"] = m["total_return_pct"] > 0
     out["seconds"] = round(time.monotonic() - t0, 1)
     return out
+
+
+def _pct(v: float) -> str:
+    return f"{v:+.1f}%"
 
 
 def _money(v: float, sym: str) -> str:
@@ -1092,6 +1109,45 @@ def walk_forward_grid(rows: list[dict], score: str, min_trades: int, a: int, b: 
     }
 
 
+def _in_range(closed: tuple, a: int, b: int, open_end: bool) -> np.ndarray:
+    exits = closed[1]
+    return (exits >= a) & ((exits < b) | open_end)
+
+
+def selection_checks(rows: list[dict], best: dict | None, a: int, b: int, open_end: bool = True) -> dict:
+    """What picking the best of the grid does to the result, over the ranked part [a, b).
+
+    ``deflated``: the top combination's deflated Sharpe ratio, counting every tested combination as
+    a try. ``overfitting``: probability of backtest overfitting, with the period cut into
+    ``stats.PBO_BLOCKS`` equal stretches and combinations compared by profit. ``open_end`` keeps
+    trades closed out just after the last candle in the last stretch."""
+    ok = [r for r in rows if not r["error"]]
+    out: dict = {"deflated": None, "overfitting": None}
+    if not ok:
+        return out
+    returns = {}
+    for r in ok:
+        start_eq, exits, pnl = r["_trades"]
+        returns[id(r)] = stats.closed_returns(start_eq, pnl)[_in_range(r["_trades"], a, b, open_end)] if len(pnl) else np.empty(0)
+    if best is not None and not best["error"]:
+        srs = [x for x in (stats.per_trade_sharpe(returns[id(r)]) for r in ok) if x is not None]
+        var = float(np.var(srs, ddof=1)) if len(srs) >= 2 else None
+        out["deflated"] = stats.deflated_sharpe(returns[id(best)], len(ok), var)
+    edges = np.linspace(a, b, stats.PBO_BLOCKS + 1)
+    profit = np.zeros((stats.PBO_BLOCKS, len(ok)))
+    for j, r in enumerate(ok):
+        _, exits, pnl = r["_trades"]
+        keep = _in_range(r["_trades"], a, b, open_end)
+        block = np.clip(np.searchsorted(edges, exits[keep], side="right") - 1, 0, stats.PBO_BLOCKS - 1)
+        profit[:, j] = np.bincount(block, weights=pnl[keep], minlength=stats.PBO_BLOCKS)
+    pbo = stats.overfitting(profit)
+    if pbo is not None:
+        pbo["from"] = pd.Timestamp(a, tz="UTC").isoformat()
+        pbo["to"] = pd.Timestamp(b - 1, tz="UTC").isoformat()
+    out["overfitting"] = pbo
+    return out
+
+
 def _chunks(items: list, workers: int) -> list[list]:
     size = max(1, min(20, -(-len(items) // max(1, workers * 6))))
     return [items[i:i + size] for i in range(0, len(items), size)]
@@ -1160,9 +1216,11 @@ def optimise(progress, variants: list[tuple[tuple, dict | str]], df: pd.DataFram
         r["score"] = score_of({**r, **part}, score)
         r["enough_trades"] = bool(not r["error"] and (part or r).get("trades", 0) >= min_trades)
         r["holdout_score"] = score_of({**r, **r["holdout"]}, score) if holdout and r.get("holdout") else None
-        r.pop("_trades", None)
     ranked = sorted((r for r in rows if r["score"] is not None), key=lambda r: (r["enough_trades"], r["score"]), reverse=True)
     best = ranked[0] if ranked else None
+    selection = selection_checks(rows, best, a, cut, open_end=not holdout_pct)
+    for r in rows:
+        r.pop("_trades", None)
     return {
         "rows": rows,
         "best": best["values"] if best else None,
@@ -1170,6 +1228,7 @@ def optimise(progress, variants: list[tuple[tuple, dict | str]], df: pd.DataFram
         "min_trades": min_trades,
         "holdout": holdout,
         "walk_forward": wf,
+        **selection,
         "tested": sum(1 for r in rows if not r["error"]),
         "failed": sum(1 for r in rows if r["error"]),
         "seconds": round(time.time() - t0, 1),

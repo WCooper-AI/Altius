@@ -63,6 +63,17 @@ function when(iso) {
 function day(iso) { return iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "–"; }
 const CURRENCY = { GBP: "£", USD: "$", EUR: "€" };
 
+/** What kind of evidence a result is: past prices, checks on those prices, or prices that came later. */
+const STAGES = {
+  past: ["Past results", "How the rules did on past prices, which you could see while building them."],
+  robust: ["Robustness checks", "Tests on the same past prices that measure how much of the result could come from chance or from picking with hindsight."],
+  forward: ["Forward test", "Prices that arrived after the test started, so the rules could not have been built around them."],
+};
+function stageTag(kind) {
+  const [label, text] = STAGES[kind];
+  return h("p", { class: "stage-tag stage-" + kind }, h("strong", {}, label), " ", h("span", { class: "muted" }, text));
+}
+
 let toastTimer;
 function toast(text, bad = false) {
   const t = document.getElementById("toast");

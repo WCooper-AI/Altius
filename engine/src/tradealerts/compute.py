@@ -190,8 +190,8 @@ def sweep(variants: list[tuple], df, fine, test_start, currency: str, notes: lis
                    "end": str(df.index[-1])})
 
 
-def luck(data: dict, df, fine, test_start, notes: list[str]) -> dict:
-    out = analysis.luck_check(strategy(data), df, fine, test_start)
+def luck(data: dict, df, fine, test_start, notes: list[str], trials: int = 1) -> dict:
+    out = analysis.luck_check(strategy(data), df, fine, test_start, trials=trials)
     out["notes"] = notes
     return _clean(out)
 

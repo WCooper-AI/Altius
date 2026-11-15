@@ -212,14 +212,15 @@ function analysisPanel({ getData, render, intro, settings, apply, runLabel = "Ru
 
   // --- luck check
   const lkOut = h("div");
+  let trials = null;
   const lkRun = h("button", { class: "primary", type: "button" }, "Run luck check");
   lkRun.addEventListener("click", async () => {
     const data = await fetchData();
     if (!data) return;
     lkRun.disabled = true;
-    clear(lkOut).appendChild(h("p", { class: "loading" }, "Backtesting on dozens of random price paths and reshuffling the trades. This takes up to a minute…"));
+    clear(lkOut).appendChild(h("p", { class: "loading" }, "Backtesting on up to 200 random price paths and reshuffling the trades. This takes up to a minute…"));
     try {
-      clear(lkOut).appendChild(renderLuck(await POST("/luck", { data, ...period.value() })));
+      clear(lkOut).appendChild(renderLuck(await POST("/luck", { data, trials, ...period.value() })));
       lkRun.textContent = "Check again";
     } catch (e) { clear(lkOut).appendChild(h("p", { class: "error-box" }, e.message)); }
     finally { lkRun.disabled = false; }
@@ -227,6 +228,9 @@ function analysisPanel({ getData, render, intro, settings, apply, runLabel = "Ru
   const luckPane = h("section", { class: "section" },
     h("p", { class: "muted small tool-intro" }, "Asks whether the backtest's result could just be luck: too few trades, all the profit from one stretch, " +
       "a handful of big winners, or rules that do just as well on made-up prices."),
+    h("div", { class: "field" }, h("label", {}, "Settings tried so far", infoTip("How many versions or settings of these rules you have backtested, counting this one. " +
+      "The more you try, the more likely the best of them looks good by chance, so the deflated Sharpe ratio raises its bar to match. Leave blank for 1.")),
+      numberInput(null, (n) => { trials = n; }, { label: "Settings tried so far", min: 1, cls: "narrow", integer: true, allowEmpty: true, placeholder: "1" })),
     h("div", { class: "tool-actions" }, lkRun), lkOut);
 
   const panes = { backtest: backtestPane, sweep: sweepPane, optimise: opt.pane, luck: luckPane };
@@ -431,13 +435,17 @@ function renderOptimiser(res, axes, onApply) {
   const ho = res.holdout;
   const part = ho ? (best.train || best) : best;
   append(box, [
+    stageTag("past"),
     h("p", { class: "result-lede" }, `From ${day(res.start)} to ${day(res.end)}, ${res.tested.toLocaleString()} combinations were tested in ${res.seconds}s. The best ${scoreName.toLowerCase()}`,
       ho ? ` on the first ${100 - ho.pct}% of the period` : "", " came from ",
       h("strong", {}, label(best.values)), ` (${fmtScore(best.score)}, ${signed(part.return_pct, "%")} over ${part.trades} trades).`),
     enough < scored.length ? h("p", { class: "muted small" }, `${scored.length - enough} of ${scored.length} combinations made fewer than ${res.min_trades} trades${ho ? " in the ranking part" : ""} and are ranked below the rest: too few trades to trust.`) : null,
+    axes.length >= 2 ? heatmap(rows, axes, res, fmtScore) : null,
+    ho || res.walk_forward || res.overfitting || res.deflated ? stageTag("robust") : null,
     ho ? renderHoldout(ho, best, label) : null,
     res.walk_forward ? renderWalkForwardGrid(res.walk_forward, label) : null,
-    axes.length >= 2 ? heatmap(rows, axes, res, fmtScore) : null,
+    res.overfitting ? renderOverfitting(res.overfitting) : null,
+    res.deflated ? renderDeflated(res.deflated, "the top combination") : null,
   ]);
   const shown = ranked.slice(0, 40);
   const table = h("table", { class: "trades sweep-table" },
@@ -489,6 +497,16 @@ function renderHoldout(ho, best, label) {
     h("p", {}, `From ${day(ho.from)} to ${day(ho.to)} (the last ${ho.pct}%), the winner made `,
       h("strong", { class: b.holdout_return_pct >= 0 ? "gain" : "loss" }, signed(b.holdout_return_pct, "%")),
       ` over ${b.holdout_trades} trade${b.holdout_trades === 1 ? "" : "s"}, against ${signed(b.train_return_pct, "%")} on the part it was ranked on. ${verdict}${hind}`));
+}
+
+/** Probability of backtest overfitting: how often the best combination on half the period finished below the middle on the other half. */
+function renderOverfitting(o) {
+  const half = o.blocks / 2;
+  return h("div", { class: "walk" }, h("h3", {}, "Probability of backtest overfitting", infoTip("Combinatorially symmetric cross-validation (Bailey, Borwein, López de Prado and Zhu, 2015). " +
+      "The period is cut into equal stretches, and every way of choosing half of them is one split. In each split the combination with the most profit on the chosen half is compared with all the others on the rest.")),
+    h("p", {}, `From ${day(o.from)} to ${day(o.to)}, cut into ${o.blocks} equal stretches, there are ${o.splits} ways to choose ${half} of them. ` +
+      `In ${o.below} of the ${o.splits}, the combination with the most profit on the chosen ${half} finished below the middle of all ${o.combinations} combinations on the other ${half}: `,
+      h("strong", {}, pctOf(o.probability)), `. In ${o.lost} of them it lost money on the other ${half}.`));
 }
 
 /** Walk-forward over the whole grid: the combination picked before each stretch and how it did. */
@@ -561,6 +579,7 @@ function renderSweep(res, setting, onUse) {
   const best = ok.reduce((a, b) => (b.return_pct > a.return_pct ? b : a));
   const steady = ok.reduce((a, b) => (b.neighbourhood_pct > a.neighbourhood_pct ? b : a));
   append(box, [
+    stageTag("past"),
     h("p", { class: "result-lede" }, `From ${day(res.start)} to ${day(res.end)}, the highest return came from `,
       h("strong", {}, optionLabel(setting, best.value)), ` (${signed(best.return_pct, "%")}).`),
     setting.type === "number" && steady.value !== best.value
@@ -583,7 +602,7 @@ function renderSweep(res, setting, onUse) {
         onUse ? h("td", { class: "num" }, r.value === setting.current ? null : h("button", { type: "button", class: "quiet",
           onclick: (e) => { onUse(r.value); e.target.closest("tbody").querySelectorAll("tr").forEach((tr) => tr.classList.remove("current")); e.target.closest("tr").classList.add("current"); e.target.remove(); } }, "Use")) : null))));
   append(box, [h("div", { class: "table-wrap" }, table)]);
-  if (res.walk_forward) box.appendChild(renderWalkForward(res.walk_forward, setting, sym));
+  if (res.walk_forward) append(box, [stageTag("robust"), renderWalkForward(res.walk_forward, setting, sym)]);
   append(box, [
     h("p", { class: "notice" }, "Careful: the value that did best on past prices is usually luckier than it looks, because you picked it after seeing the results. " +
       "Prefer a value whose neighbours also did well, check it was profitable in both halves, then run the luck check on it."),
@@ -649,6 +668,7 @@ function renderLuck(res) {
   const sym = res.currency;
   const allPass = res.total && res.passed === res.total;
   append(box, [
+    stageTag("robust"),
     h("div", { class: "luck-score" },
       h("div", { class: "luck-ring " + (allPass ? "gain" : res.passed >= res.total - 1 ? "warn" : "loss") },
         h("strong", {}, `${res.passed}/${res.total}`)),
@@ -673,10 +693,42 @@ function renderLuck(res) {
     const r = res.resample;
     box.appendChild(h("p", { class: "small muted" }, `Average trade ${signed(r.avg_r, "R")}; across the reshuffled trade sets it ranged from ${signed(r.avg_r_low, "R")} to ${signed(r.avg_r_high, "R")} (middle 90%).`));
   }
+  if (res.deflated) box.appendChild(renderDeflated(res.deflated, "these rules"));
+  else if (res.trades) box.appendChild(h("p", { class: "small muted" }, "The deflated Sharpe ratio needs at least 10 trades with different results."));
+  if (res.regimes) box.appendChild(renderRegimes(res.regimes, sym));
   box.appendChild(h("p", { class: "notice" }, "Passing these checks makes luck a less likely explanation for the backtest. It doesn't mean the rules will make money in future: markets change."));
   if (res.notes && res.notes.length) box.appendChild(h("ul", { class: "warnings" }, res.notes.map((w) => h("li", {}, w))));
-  void sym;
   return box;
+}
+
+const pctOf = (p) => num(p * 100, 0) + "%";
+
+/** Deflated Sharpe ratio: the chance the true per-trade Sharpe is above what luck alone would give after that many tries. */
+function renderDeflated(d, what) {
+  const tries = d.trials === 1 ? "1 try" : `${d.trials.toLocaleString("en-GB")} tries`;
+  const bar = d.trials === 1 ? "zero" : `${num(d.bar, 3)}, the best you'd expect from ${tries} with no real edge`;
+  return h("div", { class: "walk" }, h("h3", {}, "Deflated Sharpe ratio", infoTip("The Sharpe ratio here is per trade: the average trade's return divided by how much trade returns varied. " +
+      "The deflated version asks how likely the true ratio is above a bar that rises with the number of tries, allowing for lopsided results such as rare big wins (Bailey and López de Prado, 2014). With 1 try it is the probabilistic Sharpe ratio.")),
+    h("p", {}, `Counting ${tries} and ${d.trades} trades, the chance that the true per-trade Sharpe ratio of ${what} is above ${bar} is `,
+      h("strong", {}, pctOf(d.probability)), `. Measured per-trade Sharpe ratio: ${num(d.sharpe, 3)}.`));
+}
+
+/** Trades by the market's direction and how busy it was on the day each opened. */
+function renderRegimes(reg, sym) {
+  const tip = infoTip(`Rising: the previous day's close was above its ${reg.trend_days}-day average; falling: below it. ` +
+    `Busy: daily price moves over the previous ${reg.vol_days} days were larger than the middle value for this period; calm: smaller. Each trade counts in the conditions of the day it opened.`);
+  const groups = [["direction", "Direction"], ["activity", "Activity"]];
+  return h("div", { class: "walk regimes" }, h("h3", {}, "By market conditions", tip),
+    h("div", { class: "table-wrap" }, h("table", { class: "trades sweep-table" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Market"), h("th", { class: "num" }, "Share of days"), h("th", { class: "num" }, "Trades"),
+        h("th", { class: "num" }, "Won"), h("th", { class: "num" }, "Profit"), h("th", { class: "num" }, "Average trade"))),
+      groups.map(([key, label]) => h("tbody", {}, h("tr", { class: "group-row" }, h("th", { colspan: "6", scope: "rowgroup" }, label)),
+        reg.rows.filter((r) => r.split === key).map((r) => h("tr", {},
+          h("td", {}, r.label), h("td", { class: "num" }, num(r.days_pct, 0) + "%"), h("td", { class: "num" }, String(r.trades)),
+          h("td", { class: "num" }, r.win_rate_pct === null ? "–" : num(r.win_rate_pct, 0) + "%"),
+          h("td", { class: "num " + (r.pnl >= 0 ? "gain" : "loss") }, r.trades ? money(r.pnl, sym) : "–"),
+          h("td", { class: "num" }, r.avg_r === null ? "–" : signed(r.avg_r, "R")))))))),
+    reg.unknown ? h("p", { class: "small muted" }, `${reg.unknown} trade${reg.unknown === 1 ? "" : "s"} opened before there was ${reg.trend_days} days of history to tell the market's direction, so ${reg.unknown === 1 ? "it isn't" : "they aren't"} counted by direction.`) : null);
 }
 
 function randomStrip(r) {
@@ -702,7 +754,7 @@ function randomStrip(r) {
   label.textContent = `Real: ${signed(r.real, "%")}`;
   s.appendChild(label);
   return h("div", { class: "chart" }, h("div", { class: "chart-title" }, h("h3", {}, "Real market vs random markets"),
-    h("span", { class: "readout" }, `Random median ${signed(r.median, "%")}`)), s);
+    h("span", { class: "readout" }, `Random median ${signed(r.median, "%")}` + (r.p5 === undefined ? "" : `, middle 90% ${signed(r.p5, "%")} to ${signed(r.p95, "%")}`))), s);
 }
 
 /** In-sample vs out-of-sample figures from a backtest run with a train / test split. */
@@ -737,7 +789,7 @@ function renderSplit(res, sym) {
 function renderBacktest(res) {
   const m = res.metrics;
   const sym = res.currency;
-  const box = h("div");
+  const box = h("div", {}, stageTag("past"));
   const ret = m.total_return_pct;
   if (m.sample_warning) box.appendChild(h("p", { class: "sample-warning", role: "note" }, m.sample_warning));
   append(box, [h("div", { class: "headline" },
