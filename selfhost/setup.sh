@@ -186,7 +186,7 @@ do_desktop() {
   install_engine
   need_desktop_tools
   bold "Building the desktop app. The first build takes 5 to 15 minutes…"
-  "$VENV/bin/python" -m pip install --quiet pyinstaller
+  "$VENV/bin/python" -m pip install --quiet "${ENGINE}[yahoo,keychain]" pyinstaller
   ( cd "$DESKTOP" && PATH="$VENV/bin:$PATH" npm ci --no-audit --no-fund && PATH="$VENV/bin:$PATH" npm run build )
   bold "Done. Your installers are in:"
   say "  $DESKTOP/src-tauri/target/release/bundle/"

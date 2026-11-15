@@ -17,13 +17,16 @@ src/tradealerts/
   workspace.py config.py state.py      one person's settings, folders and SQLite store
   notify.py news.py weekly.py          alert channels, the economic calendar, the weekly report
   web/                                 the JSON API (routes/, one module per area) and app factory
-  static/                              the web interface: plain scripts, no build step
+  static/                              the web interface: ES modules, no build step
   templates/                           config and example strategies for `tradealerts init`
 tests/                                 pytest
 ```
 
-The web interface is split into plain scripts that load in order and share one scope
-(`web/app.py` lists them in `SCRIPTS`). There's no bundler: edit a file and reload.
+The web interface is split into ES modules that import what they use; the page loads
+`boot.js` (`ENTRY` in `web/app.py`), which imports the rest. `util.js` imports nothing, so it
+always runs first. There's no bundler: edit a file and reload. A module asked for as
+`name.js?v=X` asks for its imports with `?v=X` too, so a new version is never mixed with
+cached files.
 
 ## Development
 

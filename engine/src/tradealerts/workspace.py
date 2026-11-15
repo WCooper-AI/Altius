@@ -47,6 +47,7 @@ class Workspace:
     cache_dir: Path | None = None
     limits: Limits = field(default_factory=Limits)
     read_only: bool = False           # hosted: subscription lapsed
+    keychain: bool = False            # keep secrets in the computer's password store (keychain.py)
 
     def __post_init__(self):
         self.config_path = Path(self.config_path)
@@ -68,6 +69,9 @@ class Workspace:
         if not self.trusted:
             from .config import PATH_KEYS
             new = {k: v for k, v in new.items() if k not in PATH_KEYS}
+        elif self.keychain:
+            from . import keychain
+            new = keychain.stash(new, self.raw_config())
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.config_path.with_name(self.config_path.name + ".tmp")
         tmp.write_text(CONFIG_HEADER + yaml.safe_dump(new, sort_keys=False, allow_unicode=True), encoding="utf-8")

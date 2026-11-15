@@ -1,11 +1,13 @@
-"use strict";
-
 /* Trading Alerts web interface: The rule builder: groups of conditions and the inputs for each one.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { app, append, clear, h, isObj } from "./util.js";
+import { DAY_NAMES, FIELD_LABELS, indicatorMeta, isBlank, OP_WORDS } from "./describe.js";
+import { infoTip } from "./strategies.js";
 
 // --------------------------------------------------------------------- rule builder: groups
 
-function groupKind(c) {
+export function groupKind(c) {
   if (!isObj(c)) return null;
   if (Array.isArray(c.all)) return "all";
   if (Array.isArray(c.any)) return "any";
@@ -14,17 +16,17 @@ function groupKind(c) {
   return null;
 }
 /** A single condition wrapped in {not: ...} (rules.py supports it; shown as a row with a "not" switch). */
-function isNegatedLeaf(c) {
+export function isNegatedLeaf(c) {
   return isObj(c) && !groupKind(c) && isObj(c.not) && !groupKind(c.not) && Object.keys(c).length === 1;
 }
 /** The leaf itself, whether or not it is wrapped in {not: ...}. */
 function leafOf(c) { return isNegatedLeaf(c) ? c.not : c; }
 /** True for leaf shapes the builder has inputs for; anything else is kept as a read-only card. */
-function editableLeaf(c) {
+export function editableLeaf(c) {
   const x = leafOf(c);
   return isObj(x) && Boolean("left" in x || x.time_between || x.weekdays || x.avoid_news);
 }
-function groupItems(c) {
+export function groupItems(c) {
   const k = groupKind(c);
   if (k === "all") return c.all;
   if (k === "any") return c.any;
@@ -39,13 +41,13 @@ function makeGroup(kind, items) {
   return { not: { all: items } };
 }
 /** Always edit conditions as a group so there's somewhere to add rows. */
-function asGroup(c) {
+export function asGroup(c) {
   if (groupKind(c)) return c;
   if (isObj(c) && Object.keys(c).length) return { all: [c] };
   return { all: [] };
 }
 
-function newComparison() {
+export function newComparison() {
   return { left: null, op: "", right: null };
 }
 
@@ -53,7 +55,7 @@ function newComparison() {
  * Editor for a group of conditions.
  * get/set read and replace the group in its parent; onChange tells the page something changed.
  */
-function groupEditor(get, set, onChange, depth = 0, onRemove = null, pos = null) {
+export function groupEditor(get, set, onChange, depth = 0, onRemove = null, pos = null) {
   const wrap = h("div", { class: depth ? "group nested" : "group" });
   function render() {
     clear(wrap);
@@ -183,7 +185,7 @@ function conditionRow(getRaw, setRaw, onChange, onRemove, pos = null) {
   return row;
 }
 
-function tzInput(value, onInput, required = false) {
+export function tzInput(value, onInput, required = false) {
   const id = "tz-list";
   if (!document.getElementById(id)) {
     document.body.appendChild(h("datalist", { id }, app.meta.timezones.map((z) => h("option", { value: z }))));
@@ -196,7 +198,7 @@ function tzInput(value, onInput, required = false) {
   return el;
 }
 
-function timeInput(value, onSet, label = null) {
+export function timeInput(value, onSet, label = null) {
   const el = h("input", { type: "time", value: value || "", "aria-label": label });
   const mark = () => el.classList.toggle("to-fill", !el.value);
   el.addEventListener("input", () => { mark(); onSet(el.value); });
@@ -205,7 +207,7 @@ function timeInput(value, onSet, label = null) {
 }
 
 /** Picker for one side of a comparison: a price field, a number or an indicator with its settings. */
-function operandEditor(get, set, onChange, label) {
+export function operandEditor(get, set, onChange, label) {
   const wrap = h("span", { class: "operand" });
   function kindOf(v) {
     if (v === null || v === undefined) return "";
@@ -255,7 +257,7 @@ function operandEditor(get, set, onChange, label) {
   return wrap;
 }
 
-const PARAM_LABELS = { period: "bars", source: "of", std: "std devs", multiplier: "×", atr_period: "ATR bars",
+export const PARAM_LABELS = { period: "bars", source: "of", std: "std devs", multiplier: "×", atr_period: "ATR bars",
   fast: "fast", slow: "slow", signal: "signal", session_start: "from", minutes: "for (min)", tz: "zone" };
 
 function paramInput(key, value, def, type, onSet) {
@@ -275,7 +277,7 @@ function paramInput(key, value, def, type, onSet) {
   return h("span", { class: "param" }, label, input);
 }
 
-function numberInput(value, onSet, { label, step = "any", min = null, integer = false, cls = null, allowEmpty = false,
+export function numberInput(value, onSet, { label, step = "any", min = null, integer = false, cls = null, allowEmpty = false,
   emptyValue = null, placeholder = null } = {}) {
   const el = h("input", { type: "number", step, min, value: isBlank(value) ? "" : value, class: cls, inputmode: "decimal",
     "aria-label": label, placeholder });
@@ -297,7 +299,7 @@ function numberInput(value, onSet, { label, step = "any", min = null, integer = 
 }
 
 /** A select that starts on a "Choose…" option until something is picked. */
-function choiceSelect(options, value, onPick, { label, placeholder = "Choose…", cls = null } = {}) {
+export function choiceSelect(options, value, onPick, { label, placeholder = "Choose…", cls = null } = {}) {
   const sel = h("select", { "aria-label": label, class: cls },
     h("option", { value: "", disabled: true }, placeholder),
     options.map(([v, text, title]) => h("option", { value: v, title }, text)));

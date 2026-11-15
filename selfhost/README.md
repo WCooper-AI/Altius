@@ -107,6 +107,12 @@ Experienced users can choose **Build from scratch** for the full rule builder.
   a server. A safety copy is made before every restore. **Redacted backups**
   (`/api/backup?redact=true`) strip passwords, API tokens, webhook addresses and ntfy
   topics so you can share a setup safely.
+- **Secrets in your password store.** The desktop app keeps passwords, API tokens,
+  webhook addresses and ntfy topics in Windows Credential Manager, the macOS Keychain or
+  the Linux Secret Service; `config.yaml` only holds a `keychain:` reference. A full
+  backup still contains the values, so it restores on another computer. On a server
+  install, add the `keychain` extra (`pip install "tradealerts[keychain]"`) to use it;
+  without it, or with `tradealerts serve --no-keychain`, they stay in `config.yaml`.
 - **Your own values.** Every setting starts blank; nothing is suggested for you.
 - **Chart Desk interface** with light and dark themes and a choice of accent colour.
 - **Desktop app, browser or server.** Use it in your browser, use the desktop app

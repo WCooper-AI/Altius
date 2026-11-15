@@ -1,7 +1,11 @@
-"use strict";
-
 /* Trading Alerts web interface: Upcoming economic news, notes and reminders.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, append, clear, GET, h, POST, PUT, toast, when } from "./util.js";
+import { infoTip } from "./strategies.js";
+import { pref, savePref } from "./testing.js";
+import { every } from "./widgets.js";
+import { setNav } from "./boot.js";
 
 // --------------------------------------------------------------------- news: upcoming economic events
 
@@ -9,7 +13,7 @@ const IMPACT_LABEL = { high: "High impact", medium: "Medium", low: "Low" };
 const REMINDERS = [[null, "No reminder"], [0, "When it happens"], [5, "5 minutes before"], [15, "15 minutes before"],
   [30, "30 minutes before"], [60, "1 hour before"], [240, "4 hours before"], [1440, "The day before"]];
 
-function untilText(iso) {
+export function untilText(iso) {
   const ms = new Date(iso) - Date.now();
   if (ms < -60000) return ms > -3600000 ? `${Math.round(-ms / 60000)} min ago` : "earlier";
   if (ms < 60000) return "now";
@@ -30,7 +34,7 @@ function dayLabel(iso) {
   return diff === 0 ? `Today · ${date}` : diff === 1 ? `Tomorrow · ${date}` : diff === -1 ? `Yesterday · ${date}` : date;
 }
 
-async function viewNews() {
+export async function viewNews() {
   setNav("news");
   const res = await GET("/news/events?days=14");
   const all = res.events;

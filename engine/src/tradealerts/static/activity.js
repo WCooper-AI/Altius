@@ -1,6 +1,10 @@
 /* Trading Alerts: the Activity page. Everything that happened, newest first, with filters.
    It doubles as the notifications centre: opening it marks everything as seen. */
 
+import { $main, append, clear, GET, h, POST, toast, when } from "./util.js";
+import { refreshBell, skeleton } from "./widgets.js";
+import { setNav } from "./boot.js";
+
 "use strict";
 
 const ACTIVITY_FILTERS = [
@@ -11,7 +15,7 @@ const ACTIVITY_ICON = { closed: "✓", opened: "↗", signal: "◆", skipped: "!
   strategy_saved: "✎", settings_changed: "⚙", alert_failed: "!",
   data_problem: "⚠", drawdown: "↘", near_level: "◎" };
 
-async function viewActivity() {
+export async function viewActivity() {
   setNav("activity");
   const params = new URLSearchParams((location.hash.split("?")[1] || ""));
   let category = params.get("filter") || "all";

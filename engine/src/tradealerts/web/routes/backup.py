@@ -18,11 +18,11 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 
-from ... import __version__
+from ... import __version__, keychain
 from ...config import PATH_KEYS, ConfigError, load_config, uses_env
 from ...state import StateStore
 from ...strategy import strategy_files
-from ...workspace import Workspace
+from ...workspace import CONFIG_HEADER, Workspace
 from ..common import err, workspace
 from ..strategy_io import enforce_running_limit
 
@@ -35,10 +35,6 @@ MAX_STRATEGY = 200_000
 STRATEGY_NAME = re.compile(r"^strategies/[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.ya?ml$")
 README = "trading-alerts-backup.txt"
 
-# Settings that hold a password, API token or private address (any level of config.yaml).
-SECRET_KEYS = {"token", "password", "secret", "api_key", "webhook_url", "oanda_token", "headers"}
-# Notifier settings that are themselves the secret: a webhook's address, an ntfy topic.
-SECRET_NOTIFIER_KEYS = {"webhook": {"url"}, "ntfy": {"topic"}}
 ENV_ONLY = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")
 REDACTED_NOTE = ("# Shareable copy: passwords, API tokens, webhook addresses and ntfy topics were removed.\n"
                  "# Fill them in again in Settings after restoring.\n")
@@ -56,11 +52,9 @@ def redact_config(value):
         return [redact_config(v) for v in value]
     if not isinstance(value, dict):
         return value
-    extra = SECRET_NOTIFIER_KEYS.get(str(value.get("type", "")).lower(), set())
     out, blanked = {}, False
     for k, v in value.items():
-        key = str(k).lower()
-        if key in SECRET_KEYS or key in extra or key.endswith(("_token", "_password", "_secret")):
+        if keychain.is_secret(k, value.get("type", "")):
             out[k] = _blank(v) if v not in (None, "") else v
             blanked = blanked or out[k] != v
         else:
@@ -88,6 +82,10 @@ def make_backup(ws: Workspace, redact: bool = False) -> bytes:
                 except yaml.YAMLError:
                     raw = {}  # never fall back to copying a file we couldn't clean
                 z.writestr("config.yaml", REDACTED_NOTE + yaml.safe_dump(redact_config(raw), sort_keys=False,
+                                                                         allow_unicode=True))
+            elif ws.trusted and keychain.placeholders(raw := ws.raw_config()):
+                # the secrets themselves, so the backup restores on another computer
+                z.writestr("config.yaml", CONFIG_HEADER + yaml.safe_dump(keychain.reveal(raw), sort_keys=False,
                                                                          allow_unicode=True))
             else:
                 z.write(ws.config_path, "config.yaml")
@@ -126,6 +124,7 @@ def _settings_from_backup(ws: Workspace, raw: dict) -> dict:
     """A backup's settings, made safe for this workspace."""
     if not isinstance(raw, dict):
         err(422, "config.yaml in the backup is damaged")
+    raw = keychain.drop_placeholders(raw)  # a backup carries secrets, never password-store references
     if ws.trusted:
         return raw
     out = {k: v for k, v in raw.items() if k not in PATH_KEYS and k != "log_level"}

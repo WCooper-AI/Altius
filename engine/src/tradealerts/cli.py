@@ -233,7 +233,7 @@ def cmd_serve(args) -> int:
     except (ConfigError, ValueError):
         pass
     serve(args.config, args.host, args.port, run_live=not args.no_runner, no_auth=args.no_auth,
-          desktop=args.desktop, parent_pid=args.parent_pid)
+          desktop=args.desktop, parent_pid=args.parent_pid, keychain=not args.no_keychain)
     return 0
 
 
@@ -364,6 +364,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-runner", action="store_true", help="web interface only, no live checks")
     s.add_argument("--no-auth", action="store_true",
                    help="skip the password (only if a reverse proxy already handles sign-in)")
+    s.add_argument("--no-keychain", action="store_true",
+                   help="keep passwords and tokens in config.yaml, not the computer's password store")
     s.add_argument("--desktop", action="store_true", help=argparse.SUPPRESS)  # started by the desktop app
     s.add_argument("--parent-pid", type=int, default=None, help=argparse.SUPPRESS)
     s.set_defaults(func=cmd_serve)

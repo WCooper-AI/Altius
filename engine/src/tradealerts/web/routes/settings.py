@@ -6,7 +6,7 @@ from fastapi import APIRouter, Body, Depends
 from fastapi.responses import Response
 
 from ... import data as data_mod
-from ... import weekly
+from ... import keychain, weekly
 from ...config import ConfigError, data_settings, expand_env
 from ...notify import Message, broadcast, build_notifiers
 from ...workspace import Workspace
@@ -21,14 +21,23 @@ router = APIRouter()
 def notifiers_for(ws: Workspace, specs: list[dict], expand: bool = False):
     """Alert channels from settings. ``expand`` for raw settings that may still hold ${VARS}."""
     try:
-        return build_notifiers(expand_env(specs) if expand and ws.trusted else specs)
+        return build_notifiers(keychain.reveal(expand_env(specs)) if expand and ws.trusted else specs)
     except (ConfigError, ValueError, TypeError) as exc:
         err(422, f"Alert settings problem: {exc}")
 
 
+def shown(raw: dict, ws: Workspace) -> dict:
+    """Settings for the browser: stored secrets read back (passwords and tokens are still blanked),
+    plus where they're kept."""
+    out = settings_from_raw(keychain.reveal(raw) if ws.trusted else raw, ws)
+    if ws.trusted:
+        out["secrets_store"] = keychain.store_name() if ws.keychain else None
+    return out
+
+
 @router.get("/api/settings")
 def get_settings(ws: Workspace = Depends(workspace)):
-    return settings_from_raw(ws.raw_config(), ws)
+    return shown(ws.raw_config(), ws)
 
 
 SECTION_NAMES = {"poll_minutes": "how often prices are checked", "notifiers": "where alerts are sent",
@@ -41,12 +50,14 @@ def put_settings(body: dict = Body(...), ws: Workspace = Depends(workspace)):
     new = raw_from_settings(old, body, ws)
     notifiers_for(ws, new["notifiers"], expand=True)
     ws.write_config(new)
+    if ws.trusted:
+        old, new = keychain.reveal(old), keychain.reveal(new)  # compare values, not where they're kept
     changed = [name for key, name in SECTION_NAMES.items() if old.get(key) != new.get(key)]
     if changed:
         with ws.store() as store:
             text = ", ".join(changed)
             store.add_event("", now_iso(), "settings_changed", f"Settings changed\nChanged {text}.", False)
-    return settings_from_raw(new, ws)
+    return shown(ws.raw_config(), ws)
 
 
 @router.put("/api/appearance")

@@ -1,14 +1,21 @@
-"use strict";
-
 /* Trading Alerts web interface: Guided setup for beginners and the simple editor for guided strategies.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, app, append, ask, attempt, clear, clone, CURRENCY, day, DEL, h, money, nf, num, POST, PUT, signed,
+  toast } from "./util.js";
+import { describeStrategy, isBlank, markBlanks, renderParts, shareButtons, statusControls } from "./describe.js";
+import { choiceSelect, numberInput, timeInput } from "./editor.js";
+import { confirmLive, historyLink, savedToast, viewEditor, withRunningChoice } from "./strategies.js";
+import { analysisPanel, knobSettings, lineChart, renderBacktest } from "./testing.js";
+import { candleChart } from "./widgets.js";
+import { refreshStatus, setNav } from "./boot.js";
 
 // --------------------------------------------------------------------- guided setup (beginners)
 
 const recipeById = (id) => app.recipes.recipes.find((r) => r.id === id);
-const marketByKey = (k) => app.recipes.markets.find((m) => m.key === k);
+export const marketByKey = (k) => app.recipes.markets.find((m) => m.key === k);
 /* One line of facts about a built-in market: price step, sizes, margin and hours. */
-function instrumentLine(i) {
+export function instrumentLine(i) {
   const parts = [`Price step ${i.tick_size} (${i.tick_value} ${i.quote} per 1 of size)`, `smallest size ${i.min_size}, in steps of ${i.size_step}`];
   if (i.margin_pct != null) parts.push(`usual margin ${i.margin_pct}%`);
   if (i.hours) parts.push(i.hours);
@@ -165,7 +172,7 @@ async function buildFromRecipe(recipeId, marketKey, settings) {
 
 // ----- create page: 1 market, 2 idea, 3 settings
 
-async function viewCreate(preset) {
+export async function viewCreate(preset) {
   setNav("strategies");
   const st = { market: preset && marketByKey(preset) ? preset : null, recipe: null, settings: {}, built: null, name: "", nameTouched: false };
   let dirty = false;
@@ -333,7 +340,7 @@ async function viewCreate(preset) {
 
 // ----- simple editor for strategies made with the guided setup
 
-async function viewSimple(id, data, run) {
+export async function viewSimple(id, data, run) {
   setNav("strategies");
   const recipe = recipeById(data.recipe.id);
   if (!recipe) return viewEditor(id, null, data, run);

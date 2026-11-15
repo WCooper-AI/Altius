@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import mimetypes
 import os
 import re
 import socket
@@ -38,9 +39,25 @@ log = logging.getLogger(__name__)
 STATIC = resources.files("tradealerts") / "static"
 CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
        "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-# The interface's scripts, in load order. They share one scope (classic scripts, no build step).
-SCRIPTS = ["util.js", "describe.js", "editor.js", "strategies.js", "testing.js", "guided.js", "dashboard.js",
-           "settings.js", "widgets.js", "markets.js", "journal.js", "portfolio.js", "news.js", "compare.js", "history.js", "activity.js", "boot.js"]
+# The interface is ES modules with no build step: the page loads boot.js, which imports the rest.
+ENTRY = "boot.js"
+# Windows can map .js to text/plain in its registry; browsers refuse modules served that way.
+mimetypes.add_type("text/javascript", ".js")
+IMPORT_RE = re.compile(rb'(\bfrom\s*")(\.{1,2}/[\w./-]+\.js)(")')
+
+
+class VersionedStatic(StaticFiles):
+    """Static files. A module asked for as ``name.js?v=X`` imports its neighbours with ``?v=X`` too,
+    so the whole interface follows the version in the page (the desktop window caches hard)."""
+
+    async def get_response(self, path: str, scope) -> Response:
+        resp = await super().get_response(path, scope)
+        q = re.search(rb"(?:^|&)v=([\w-]{1,40})(?:&|$)", scope.get("query_string") or b"")
+        if not (q and path.endswith(".js") and resp.status_code == 200 and hasattr(resp, "path")):
+            return resp
+        body = IMPORT_RE.sub(rb"\1\2?v=" + q.group(1) + rb"\3", Path(resp.path).read_bytes())
+        keep = {k: v for k, v in resp.headers.items() if k not in ("content-length", "etag", "last-modified")}
+        return Response(body, headers=keep, media_type="text/javascript")
 
 
 def static_version(extra_dirs=()) -> str:
@@ -124,20 +141,20 @@ def build_app(ctx: AppContext, *, authorize: Callable[[Request], Response | None
         app.include_router(r)
 
     extra_static = extra_static or {}
-    scripts = SCRIPTS[:-1] + list(ctx.extra_scripts) + SCRIPTS[-1:]
+    scripts = [*ctx.extra_scripts, ENTRY]   # hosted extras (modules) register before boot.js starts the app
 
     @app.get("/", include_in_schema=False)
     def index():
         html = (Path(str(STATIC)) / "index.html").read_text(encoding="utf-8")
         v = static_version(extra_static.values())
-        tags = "\n".join(f'<script src="/static/{s}?v={v}" defer></script>' for s in scripts)
+        tags = "\n".join(f'<script type="module" src="/static/{s}?v={v}"></script>' for s in scripts)
         html = html.replace("<!-- scripts -->", tags)
         html = re.sub(r'(/static/[\w.-]+\.(?:js|css))(?=")', rf"\1?v={v}", html)
         return Response(html, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
 
     for prefix, folder in extra_static.items():
-        app.mount(f"/static/{prefix}", StaticFiles(directory=str(folder)), name=f"static-{prefix}")
-    app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+        app.mount(f"/static/{prefix}", VersionedStatic(directory=str(folder)), name=f"static-{prefix}")
+    app.mount("/static", VersionedStatic(directory=str(STATIC)), name="static")
     return app
 
 
@@ -145,10 +162,10 @@ def build_app(ctx: AppContext, *, authorize: Callable[[Request], Response | None
 
 
 def create_app(config_path: str | Path | None = None, password: str | None = None, runner=None,
-               allowed_hosts: set[str] | None = None, desktop: bool = False) -> FastAPI:
+               allowed_hosts: set[str] | None = None, desktop: bool = False, keychain: bool = False) -> FastAPI:
     from .. import news
 
-    ws = Workspace(Path(config_path) if config_path else Path("config.yaml"))
+    ws = Workspace(Path(config_path) if config_path else Path("config.yaml"), keychain=keychain)
     c = ws.config()
     for sid in ws.migrate():
         log.info("%s: updated to follow Settings, Price data", sid)
@@ -211,7 +228,7 @@ def bind_socket(host: str, port: int, fallback: bool = False) -> socket.socket:
 
 
 def serve(config_path: str | None, host: str, port: int, run_live: bool = True, no_auth: bool = False,
-          desktop: bool = False, parent_pid: int | None = None) -> None:
+          desktop: bool = False, parent_pid: int | None = None, keychain: bool = True) -> None:
     import uvicorn
 
     from ..runner import LiveRunner
@@ -233,7 +250,7 @@ def serve(config_path: str | None, host: str, port: int, run_live: bool = True, 
     runner = LiveRunner(Workspace(Path(path))).start() if run_live else None
     # On this computer only, refuse requests addressed to any other host name (DNS rebinding).
     hosts = {f"{n}:{port}" for n in ("127.0.0.1", "localhost", "[::1]")} if loopback else None
-    app = create_app(path, password=password, runner=runner, allowed_hosts=hosts, desktop=desktop)
+    app = create_app(path, password=password, runner=runner, allowed_hosts=hosts, desktop=desktop, keychain=keychain)
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning",
                                            proxy_headers=not loopback))
     app.state.ctx.shutdown = lambda: setattr(server, "should_exit", True)

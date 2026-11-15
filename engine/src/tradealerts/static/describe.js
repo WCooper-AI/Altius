@@ -1,25 +1,29 @@
-"use strict";
-
 /* Trading Alerts web interface: Strategies in plain English, and their status (draft, alerts on, forward testing).
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, app, append, ask, clear, clone, CURRENCY, h, isObj, money, nf, num, POST, short, showCopy, toast,
+  when } from "./util.js";
+import { groupItems, groupKind, isNegatedLeaf } from "./editor.js";
+import { confirmLive } from "./strategies.js";
+import { refreshStatus } from "./boot.js";
 
 // --------------------------------------------------------------------- describing rules in plain English
 // Each describer returns a list of parts: strings, or {m: text} for values the user chose (highlighted).
 
-const OP_WORDS = {
+export const OP_WORDS = {
   "<": "is below", "<=": "is at or below", ">": "is above", ">=": "is at or above", "==": "equals",
   crosses_above: "crosses above", crosses_below: "crosses below",
 };
 const FIELD_WORDS = { close: "the close", open: "the open", high: "the high", low: "the low", volume: "volume" };
-const FIELD_LABELS = { close: "Close price", open: "Open price", high: "High", low: "Low", volume: "Volume" };
-const DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+export const FIELD_LABELS = { close: "Close price", open: "Open price", high: "High", low: "Low", volume: "Volume" };
+export const DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const M = (text) => ({ m: String(text) });
-const isBlank = (v) => v === null || v === undefined || v === "" || (typeof v === "number" && Number.isNaN(v));
+export const isBlank = (v) => v === null || v === undefined || v === "" || (typeof v === "number" && Number.isNaN(v));
 /** A value the user still has to fill in, shown as a gap in the sentence. */
 const B = (hint = "…") => ({ m: hint, blank: true });
 const V = (v, fmt = (x) => x) => (isBlank(v) ? B() : M(fmt(v)));
 
-function indicatorMeta(name) { return (app.meta.indicators || []).find((i) => i.name === name); }
+export function indicatorMeta(name) { return (app.meta.indicators || []).find((i) => i.name === name); }
 
 function describeOperand(v) {
   if (v === "") return [B("a number")];
@@ -78,7 +82,7 @@ function joinParts(list, word) {
   return out;
 }
 
-function describeCondition(c, nested = false) {
+export function describeCondition(c, nested = false) {
   if (!isObj(c)) return ["?"];
   const groupMode = groupKind(c);
   if (groupMode) {
@@ -128,7 +132,7 @@ function describeLevel(spec, which) {
   return null;
 }
 
-function describeStrategy(d) {
+export function describeStrategy(d) {
   const m = d.market || {};
   const r = d.risk || {};
   const sym = CURRENCY[r.currency] || "";
@@ -152,7 +156,7 @@ function describeStrategy(d) {
 }
 
 /** Turn stand-in values (a preview's placeholders) back into gaps. Each placeholder blanks one match. */
-function markBlanks(parts, placeholders) {
+export function markBlanks(parts, placeholders) {
   const left = (placeholders || []).map((v) => short(v));
   return parts.map((p) => {
     if (typeof p === "string" || p.blank) return p;
@@ -164,9 +168,9 @@ function markBlanks(parts, placeholders) {
 }
 
 /** The sentence as plain text, for tooltips and titles. */
-function partsText(parts) { return parts.map((p) => (typeof p === "string" ? p : p.m)).join(""); }
+export function partsText(parts) { return parts.map((p) => (typeof p === "string" ? p : p.m)).join(""); }
 
-function renderParts(parts, cls = "sentence") {
+export function renderParts(parts, cls = "sentence") {
   const p = h("p", { class: cls });
   for (const part of parts) {
     if (typeof part === "string") p.appendChild(document.createTextNode(part));
@@ -178,7 +182,7 @@ function renderParts(parts, cls = "sentence") {
 // --------------------------------------------------------------------- strategy status (draft / live / paused)
 
 /** Export, copy a share link. The link carries the rules only, never results or account details. */
-function shareButtons(id, getData) {
+export function shareButtons(id, getData) {
   const fileBtn = h("a", { class: "button quiet", href: `/api/strategies/${encodeURIComponent(id)}/export`, download: "" , title: "Download the rules as a file" }, "Export");
   const linkBtn = h("button", { type: "button", class: "quiet", title: "Copy a link that imports these rules into someone's Altius", onclick: async () => {
     const d = clone(getData());
@@ -191,7 +195,7 @@ function shareButtons(id, getData) {
   return [fileBtn, linkBtn];
 }
 
-async function viewImport(b64) {
+export async function viewImport(b64) {
   let data;
   try {
     const json = decodeURIComponent(escape(atob(b64.replace(/-/g, "+").replace(/_/g, "/"))));
@@ -214,15 +218,15 @@ async function viewImport(b64) {
       h("div", { class: "save-row" }, h("a", { class: "button", href: "#/strategies" }, "Cancel"), btn)))));
 }
 
-function statusOf(d) {
+export function statusOf(d) {
   if (d.template !== false) return "draft";
   return d.enabled === false ? "paused" : "live";
 }
 const STATUS_TEXT = { draft: "Draft", live: "Alerts on", paused: "Paused" };
-function pill(status, text) { return h("span", { class: `pill ${status}` }, text || STATUS_TEXT[status]); }
+export function pill(status, text) { return h("span", { class: `pill ${status}` }, text || STATUS_TEXT[status]); }
 function problemOf(sid) { return (((app.status || {}).runner || {}).problems || {})[sid] || null; }
-const hhmm = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-function reopenText(t) {
+export const hhmm = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+export function reopenText(t) {
   const d = new Date(t);
   return d.toLocaleDateString("en-GB", { weekday: "short" }) + " " + hhmm(d);
 }
@@ -239,25 +243,25 @@ function stateDetail(hl) {
   if (hl.state === "stopped") return "This forward test has finished.";
   return hl.next_check ? `Checked every time a candle closes. Next check at ${hhmm(hl.next_check)}.` : "Checked every time a candle closes.";
 }
-function stateBadge(hl) {
+export function stateBadge(hl) {
   hl = hl || { state: "watching" };
   return h("span", { class: "health " + hl.state, title: stateDetail(hl) }, h("span", { class: "health-dot", "aria-hidden": "true" }), stateLabel(hl));
 }
-function stateLine(hl) {
+export function stateLine(hl) {
   if (!hl) return null;
   const cls = hl.state === "attention" ? "health-line attention small" : hl.state === "waiting" ? "health-line waiting small" : "health-line small muted";
   return h("p", { class: cls }, stateDetail(hl));
 }
 
 /** What a strategy is doing: alerts on (always forward-testing), forward testing silently, or a draft. */
-function displayStatus(d, run) {
+export function displayStatus(d, run) {
   if (statusOf(d) === "live") return "live";
   if (run) return "testing";
   return "draft";
 }
 STATUS_TEXT.testing = "Forward testing";
-function signedMoney(v, sym) { return (v > 0 ? "+" : "") + money(v, sym); }
-function positionText(run, direction) {
+export function signedMoney(v, sym) { return (v > 0 ? "+" : "") + money(v, sym); }
+export function positionText(run, direction) {
   if (run.position) {
     const u = run.position.unrealised;
     return `Open ${direction === "short" ? "sell" : "buy"} at ${num(run.position.entry_price)}` +
@@ -268,7 +272,7 @@ function positionText(run, direction) {
   return "Waiting for a signal";
 }
 /** The fuller version for a card: the trade's levels, or what it's waiting for. */
-function doingText(run, direction) {
+export function doingText(run, direction) {
   const p = run.position;
   if (p) {
     const u = p.unrealised;
@@ -280,12 +284,12 @@ function doingText(run, direction) {
   if (!run.candles) return "Waiting for the first candle to close";
   return "Waiting for the rules to be met";
 }
-function marketText(hl) {
+export function marketText(hl) {
   if (!hl) return null;
   if (hl.state === "waiting") return `Market shut (${hl.why === "weekend" ? "weekend" : "daily break"}), opens ${reopenText(hl.reopens)}`;
   return "Market open";
 }
-function checksText(hl) {
+export function checksText(hl) {
   if (!hl || hl.state === "attention" || hl.state === "stopped") return null;
   const parts = [];
   if (hl.last_check) parts.push(`Last check ${hhmm(hl.last_check)}`);
@@ -294,7 +298,7 @@ function checksText(hl) {
 }
 
 /** Forward test start/stop and the phone alerts switch, shared by both editors. */
-function statusControls(o) {
+export function statusControls(o) {
   const wrap = h("div", { class: "status-controls" });
   let run = o.run || null;
   const render = () => {

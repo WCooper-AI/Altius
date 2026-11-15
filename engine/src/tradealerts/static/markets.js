@@ -1,13 +1,21 @@
-"use strict";
-
 /* Trading Alerts web interface: Markets: live charts and price alerts.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, ApiError, app, append, clear, DEL, GET, h, num, POST, PUT, signed, toast, when } from "./util.js";
+import { isBlank, reopenText } from "./describe.js";
+import { choiceSelect, numberInput } from "./editor.js";
+import { infoTip } from "./strategies.js";
+import { pref, savePref } from "./testing.js";
+import { marketByKey } from "./guided.js";
+import { undoable } from "./settings.js";
+import { candleChart, every, fmtPrice, priceDigits } from "./widgets.js";
+import { setNav } from "./boot.js";
 
 // --------------------------------------------------------------------- markets: live charts + price alerts
 
 const LIVE_TFS = [["5m", "5m"], ["15m", "15m"], ["1h", "1h"], ["4h", "4h"], ["1d", "1d"]];
 
-async function viewMarkets() {
+export async function viewMarkets() {
   setNav("markets");
   let market = pref("ta-live-market", "us500");
   if (!marketByKey(market)) market = "us500";
@@ -249,7 +257,7 @@ function marketsTabs(active) {
     h("a", { href: "#/markets/stats", "aria-current": active === "stats" ? "page" : null, "aria-pressed": String(active === "stats") }, "Stats"));
 }
 
-const hh = (n) => String(n).padStart(2, "0") + ":00";
+export const hh = (n) => String(n).padStart(2, "0") + ":00";
 
 /** Columns for the 24 hours of the day. values: 24 numbers or nulls. */
 function hourBars(values, { fmt, label, tone = "", highlight = [] } = {}) {
@@ -322,7 +330,7 @@ function rangeMeter(label, r, fmt, tip) {
         ` · ${num(share, 0)}% of a typical ${label.toLowerCase()}, bigger than ${num(r.current_rank, 0)}% of past ${label.toLowerCase()}s`]));
 }
 
-async function viewMarketStats() {
+export async function viewMarketStats() {
   setNav("markets");
   let market = pref("ta-live-market", "us500");
   if (!marketByKey(market)) market = "us500";

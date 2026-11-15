@@ -1,11 +1,17 @@
-"use strict";
-
 /* Trading Alerts web interface: Testing several strategies together on one balance.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, append, clear, day, GET, h, money, num, POST, signed, svg, toast } from "./util.js";
+import { isBlank, signedMoney } from "./describe.js";
+import { numberInput } from "./editor.js";
+import { infoTip } from "./strategies.js";
+import { gridlines, lineChart, periodPicker, pref, savePref } from "./testing.js";
+import { expandable } from "./widgets.js";
+import { setNav } from "./boot.js";
 
 // --------------------------------------------------------------------- portfolio: strategies together
 
-async function viewPortfolio() {
+export async function viewPortfolio() {
   setNav("strategies");
   const list = await GET("/strategies");
   const ok = list.strategies.filter((x) => !x.error);

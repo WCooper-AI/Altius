@@ -1,18 +1,23 @@
-"use strict";
-
 /* Trading Alerts web interface: Testing tools beside the editor: backtest, compare settings, luck check.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { append, clear, day, GET, h, isObj, money, num, POST, short, signed, stageTag, svg, toast, when } from "./util.js";
+import { describeCondition, indicatorMeta, isBlank, renderParts } from "./describe.js";
+import { groupItems, groupKind, numberInput, PARAM_LABELS } from "./editor.js";
+import { infoTip, STOP_KINDS, TARGET_KINDS } from "./strategies.js";
+import { isHosted } from "./settings.js";
+import { candleChart, expandable } from "./widgets.js";
 
 // --------------------------------------------------------------------- backtest panel
 
 // ----- test period picker, shared by both backtest panels
 
 const PERIODS = [1, 2, 3, 5, 10];
-function pref(key, fallback) { try { return localStorage.getItem(key) ?? fallback; } catch (_) { return fallback; } }
-function savePref(key, value) { try { localStorage.setItem(key, value); } catch (_) { /* not saved */ } }
+export function pref(key, fallback) { try { return localStorage.getItem(key) ?? fallback; } catch (_) { return fallback; } }
+export function savePref(key, value) { try { localStorage.setItem(key, value); } catch (_) { /* not saved */ } }
 
 /** Select for "Last N years" (and optionally custom dates). value() gives the request fields. */
-function periodPicker({ custom = false } = {}) {
+export function periodPicker({ custom = false } = {}) {
   const sel = h("select", { "aria-label": "Test period" },
     PERIODS.map((y) => h("option", { value: String(y) }, y === 1 ? "Last year" : `Last ${y} years`)),
     custom ? h("option", { value: "custom" }, "Custom dates") : null);
@@ -34,14 +39,14 @@ function periodPicker({ custom = false } = {}) {
 
 // ----- testing tools: backtest, compare settings, luck check
 
-function setPath(obj, path, value) {
+export function setPath(obj, path, value) {
   let node = obj;
   for (const k of path.slice(0, -1)) node = node[k];
   node[path[path.length - 1]] = value;
 }
 
 /** Numbers in a custom strategy's rules that "Compare settings" can vary. */
-function pathSettings(d) {
+export function pathSettings(d) {
   const out = [];
   const add = (path, label, v, integer = false) => {
     if (typeof v === "number") out.push({ kind: "path", path, label, type: "number", integer, current: v });
@@ -84,7 +89,7 @@ function pathSettings(d) {
 }
 
 /** A guided strategy's settings that "Compare settings" can vary. */
-function knobSettings(recipe, st) {
+export function knobSettings(recipe, st) {
   const out = [];
   for (const k of recipe.knobs) {
     const base = { kind: "knob", key: k.key, label: k.label + (k.unit ? ` (${k.unit})` : ""), current: st[k.key] };
@@ -111,7 +116,7 @@ function rangeValues(from, to, step, integer) {
 }
 
 /** Backtest, Compare settings and Luck check, sharing one test period. */
-function analysisPanel({ getData, render, intro, settings, apply, runLabel = "Run backtest", strategyId = null }) {
+export function analysisPanel({ getData, render, intro, settings, apply, runLabel = "Run backtest", strategyId = null }) {
   const period = periodPicker({ custom: true });
   const TABS = [["backtest", "Backtest"], ["sweep", "Compare settings"], ["optimise", "Optimiser"], ["luck", "Luck check"]];
   let current = pref("ta-tool", "backtest");
@@ -786,7 +791,7 @@ function renderSplit(res, sym) {
   return box;
 }
 
-function renderBacktest(res) {
+export function renderBacktest(res) {
   const m = res.metrics;
   const sym = res.currency;
   const box = h("div", {}, stageTag("past"));
@@ -1117,7 +1122,7 @@ function testStamp(meta, sym, quality) {
 let gradSeq = 0;
 
 /** 3-4 horizontal gridlines at round values, labelled on the right, behind the line. */
-function gridlines(s, lo, hi, y, fmt, W, P) {
+export function gridlines(s, lo, hi, y, fmt, W, P) {
   const span = hi - lo;
   if (!(span > 0) || !isFinite(span)) return;
   const rough = span / 3.5;
@@ -1134,7 +1139,7 @@ function gridlines(s, lo, hi, y, fmt, W, P) {
   }
 }
 
-function lineChart(points, { title, fmt, baseline = null, tone = "ink", fill = true, height = 170, timeX = false, band = null,
+export function lineChart(points, { title, fmt, baseline = null, tone = "ink", fill = true, height = 170, timeX = false, band = null,
   compare = null, compareLabel = "Comparison", onToggleCompare = null, compareOn = false }) {
   const W = 560, H = height, P = 6;
   const wrap = h("div", { class: "chart" });

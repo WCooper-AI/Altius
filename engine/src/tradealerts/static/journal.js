@@ -1,7 +1,14 @@
-"use strict";
-
 /* Trading Alerts web interface: The trade journal.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, app, append, clear, clone, CURRENCY, DEL, GET, h, money, num, POST, PUT, short, toast, when } from "./util.js";
+import { isBlank, signedMoney } from "./describe.js";
+import { choiceSelect, numberInput } from "./editor.js";
+import { infoTip, RISK_HELP } from "./strategies.js";
+import { marketByKey } from "./guided.js";
+import { undoable } from "./settings.js";
+import { priceDigits } from "./widgets.js";
+import { setNav } from "./boot.js";
 
 // --------------------------------------------------------------------- journal
 
@@ -13,7 +20,7 @@ function toLocalInput(iso) {
 }
 const marketName = (m) => (marketByKey(m) || {}).label || m;
 
-async function journalDialog(entry, onSaved, prefill = null) {
+export async function journalDialog(entry, onSaved, prefill = null) {
   /* entry: an existing journal entry to edit. prefill: starting values for a new one
      (e.g. from a paper trade's "Log real trade" button), including paper_trade_id to link it. */
   const e = entry ? clone(entry) : { direction: null, ...(prefill || {}) };
@@ -129,7 +136,7 @@ function equityCurve(points, sym) {
   return h("div", {}, box, h("p", { class: "small muted" }, `Running P/L after each closed trade: ${signedMoney(last, sym)} after ${points.length}.`));
 }
 
-async function viewJournal() {
+export async function viewJournal() {
   setNav("journal");
   const f = journalFilter;
   const q = Object.entries(f).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
