@@ -42,6 +42,13 @@ def summary_rows(res: BacktestResult) -> list[tuple[str, str]]:
             ("Longest winning / losing streak", f"{m['longest_winning_streak']} / {m['longest_losing_streak']}"),
             ("Sharpe / Sortino (annualised)", f"{_ratio(m.get('sharpe'))} / {_ratio(m.get('sortino'))}"),
             ("Longest time below a previous high", f"{m.get('longest_underwater_days', 0):.1f} days"),
+            ("Yearly growth rate (CAGR)", "Needs a test of a year or more" if m.get("cagr_pct") is None
+             else f"{m['cagr_pct']:+.2f}%"),
+            ("Calmar (yearly growth ÷ worst drawdown)", _ratio(m.get("calmar"))),
+            ("Worst drawdown, how long", _drawdown_length(m.get("worst_drawdown"))),
+            ("Average of the worst 5% of days", "Needs 20 days or more" if m.get("expected_shortfall_pct") is None
+             else f"{m['expected_shortfall_pct']:+.2f}%"),
+            *_period_rows(m.get("periods") or {}),
             ("Exit reasons", ", ".join(f"{k}: {v}" for k, v in m["exit_reasons"].items())),
             ("Spread paid", _money(m.get("total_spread_cost", 0.0), sym)
              + (" (from the data's bid/ask)" if m.get("used_data_spread") else "")),
@@ -63,6 +70,19 @@ def summary_rows(res: BacktestResult) -> list[tuple[str, str]]:
 
 def _ratio(v) -> str:
     return "–" if v is None else f"{v:.2f}"
+
+
+def _drawdown_length(w: dict | None) -> str:
+    if not w:
+        return "No drawdown"
+    back = (f"{w['days_to_recover']:.0f} days to get back" if w["recovered"]
+            else "not back to the earlier high by the end")
+    return f"{w['days_down']:.0f} days falling, {back}"
+
+
+def _period_rows(periods: dict) -> list[tuple[str, str]]:
+    return [(f"Biggest fall / rise in a {name}", f"{p['worst']:+.2f}% ({p['worst_at']}) / {p['best']:+.2f}% ({p['best_at']})")
+            for name, p in periods.items() if p]
 
 
 def warnings_for(res: BacktestResult) -> list[str]:

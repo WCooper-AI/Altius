@@ -83,28 +83,50 @@ async function viewCompare() {
       h("div", { class: "panel" }, h("section", { class: "section" }, out)))));
 }
 
-function renderCompare(results) {
+/** Side by side results. With { versions: true } nothing is marked best, and two results get a
+ * Change column (second minus first). Rows: [label, format, value, format a change]. */
+function renderCompare(results, { versions = false } = {}) {
   const series = results.map((r) => {
     const start = r.res.metrics.start_equity;
     return { name: r.name, points: r.res.equity.map((p) => [p[0], (p[1] / start - 1) * 100]) };
   });
+  const pts = (d) => signed(d, " pts", 1);
+  const worstDay = (m) => (m.periods && m.periods.day ? m.periods.day.worst : null);
   const rows = [
-    ["Return", (m) => signed(m.total_return_pct, "%"), (m) => m.total_return_pct],
-    ["Worst drawdown", (m) => num(m.max_drawdown_pct, 1) + "%", (m) => m.max_drawdown_pct],
-    ["Trades", (m) => String(m.trades), null],
-    ["Won", (m) => (m.trades ? num(m.win_rate_pct, 0) + "%" : "–"), (m) => m.win_rate_pct],
+    ["Return", (m) => signed(m.total_return_pct, "%"), (m) => m.total_return_pct, pts],
+    ["Yearly growth (CAGR)", (m) => (m.cagr_pct === null || m.cagr_pct === undefined ? "–" : signed(m.cagr_pct, "%")), (m) => m.cagr_pct, pts],
+    ["Worst drawdown", (m) => num(m.max_drawdown_pct, 1) + "%", (m) => m.max_drawdown_pct, pts],
+    ["Calmar", (m) => num(m.calmar), (m) => m.calmar, (d) => signed(d)],
+    ["Worst day", (m) => signed(worstDay(m), "%"), worstDay, pts],
+    ["Average of the worst 5% of days", (m) => signed(m.expected_shortfall_pct, "%"), (m) => m.expected_shortfall_pct, pts],
+    ["Trades", (m) => String(m.trades), versions ? (m) => m.trades : null, (d) => signed(d, "", 0)],
+    ["Won", (m) => (m.trades ? num(m.win_rate_pct, 0) + "%" : "–"), (m) => (m.trades ? m.win_rate_pct : null), pts],
     ["Profit factor", (m) => (!m.trades ? "–" : m.profit_factor === null || m.profit_factor === undefined ? "No losses" : num(m.profit_factor, 2)),
-      (m) => (m.trades && (m.profit_factor === null || m.profit_factor === undefined) ? Infinity : m.profit_factor)],
-    ["Average trade", (m) => (m.avg_r === null || m.avg_r === undefined ? "–" : signed(m.avg_r, "R")), (m) => m.avg_r],
+      (m) => (m.trades && (m.profit_factor === null || m.profit_factor === undefined) ? Infinity : m.profit_factor), (d) => signed(d)],
+    ["Average trade", (m) => (m.avg_r === null || m.avg_r === undefined ? "–" : signed(m.avg_r, "R")), (m) => m.avg_r, (d) => signed(d, "R")],
   ];
+  const change = versions && results.length === 2;
+  const has = (v) => v !== null && v !== undefined && Number.isFinite(v);
+  const diff = (val, chg) => {
+    if (!val) return "–";
+    const [a, b] = results.map((r) => val(r.res.metrics));
+    return has(a) && has(b) ? chg(b - a) : "–";
+  };
+  const note = versions
+    ? "Each version is backtested over the same period with its own settings." +
+      (change ? ` Change is ${results[1].name} minus ${results[0].name}; for rows in %, it is in percentage points (pts).` : "")
+    : "The best value in each row is highlighted. A higher number isn't always better on its own: weigh return against the worst drop.";
   return h("div", { class: "compare-out" },
     multiChart(series, { title: "Return over time (%)", fmt: (v) => signed(v, "%") }),
     h("div", { class: "table-wrap" }, h("table", { class: "trades compare-table" },
-      h("thead", {}, h("tr", {}, h("th", {}), results.map((r, i) => h("th", { class: "num" }, h("span", { class: `swatch line ${SERIES_TONES[i]}` }), " ", r.name)))),
-      h("tbody", {}, rows.map(([label, fmt, val]) => {
-        const vals = val ? results.map((r) => val(r.res.metrics)) : [];
+      h("thead", {}, h("tr", {}, h("th", {}), results.map((r, i) => h("th", { class: "num" }, h("span", { class: `swatch line ${SERIES_TONES[i]}` }), " ", r.name)),
+        change ? h("th", { class: "num" }, "Change") : null)),
+      h("tbody", {}, rows.map(([label, fmt, val, chg]) => {
+        const vals = val && !versions ? results.map((r) => val(r.res.metrics)) : [];
         const best = vals.length ? Math.max(...vals.filter((v) => v !== null && v !== undefined)) : null;
-        return h("tr", {}, h("th", {}, label), results.map((r, i) => h("td", { class: "num" + (val && vals[i] === best && results.length > 1 ? " best" : "") }, fmt(r.res.metrics))));
+        return h("tr", {}, h("th", {}, label),
+          results.map((r, i) => h("td", { class: "num" + (vals.length && vals[i] === best && results.length > 1 ? " best" : "") }, fmt(r.res.metrics))),
+          change ? h("td", { class: "num" }, diff(val, chg)) : null);
       })))),
-    h("p", { class: "small muted" }, "The best value in each row is highlighted. A higher number isn't always better on its own: weigh return against the worst drop."));
+    h("p", { class: "small muted" }, note));
 }

@@ -814,6 +814,11 @@ function renderBacktest(res) {
     ["Sharpe (yearly)", num(m.sharpe) + (m.sharpe_ci ? ` (95% CI, approx. assuming independent trades: ${num(m.sharpe_ci[0])} to ${num(m.sharpe_ci[1])})` : "")],
     ["Sortino (yearly)", num(m.sortino)],
     ["Longest time below a previous high", `${num(m.longest_underwater_days, 1)} days`],
+    ["Yearly growth rate (CAGR)", m.cagr_pct === null || m.cagr_pct === undefined ? "Needs a test of a year or more" : signed(m.cagr_pct, "%")],
+    ["Calmar (yearly growth ÷ worst drawdown)", num(m.calmar)],
+    ["Worst drawdown, how long", drawdownLength(m.worst_drawdown)],
+    ["Average of the worst 5% of days", m.expected_shortfall_pct === null || m.expected_shortfall_pct === undefined
+      ? "Needs 20 days or more" : signed(m.expected_shortfall_pct, "%")],
     ["How trades ended", Object.entries(m.exit_reasons || {}).map(([k, v]) => `${k.replace(/_/g, " ")} ${v}`).join(", ")],
     ["Spread paid", money(m.total_spread_cost || 0, sym) + (m.used_data_spread ? " (real bid/ask)" : "")],
     ["Overnight funding paid", money(m.total_funding || 0, sym)],
@@ -872,6 +877,7 @@ function renderBacktest(res) {
   append(box, [lineChart(res.drawdown, { title: "Drawdown", fmt: (v) => num(v, 1) + "%", baseline: 0, tone: "loss", fill: true })]);
   if (res.monte_carlo) box.appendChild(renderMonteCarlo(res.monte_carlo));
   if (m.monthly_returns && m.monthly_returns.length) box.appendChild(monthlyGrid(m.monthly_returns));
+  if (m.trades) box.appendChild(renderBreakdowns(m, sym));
   if (m.trades) {
     append(box, [h("div", { class: "chart-pair" },
       histogram(m.r_histogram, { title: "Trades by result (R)", fmt: (v) => signed(v, "R", 1), unit: "R" }),
@@ -946,6 +952,46 @@ function monthlyGrid(years) {
       h("thead", {}, h("tr", {}, h("th", {}, "Year"), MONTHS.map((x) => h("th", { class: "num" }, x)), h("th", { class: "num ytd" }, "Year"))),
       h("tbody", {}, years.map((y) => h("tr", {}, h("th", {}, String(y.year)), y.months.map(cell), h("td", { class: "num ytd " + (y.ytd > 0 ? "gain" : y.ytd < 0 ? "loss" : "") }, signed(y.ytd, "%", 1))))))),
     h("p", { class: "small muted" }, "Change in the balance over each calendar month of the test. Blank months are outside the test period."));
+}
+
+/** "12 days falling, 30 days to get back" for the deepest drop. */
+function drawdownLength(w) {
+  if (!w) return "No drawdown";
+  const back = w.recovered ? `${num(w.days_to_recover, 0)} days to get back` : "not back to the earlier high by the end";
+  return `${num(w.days_down, 0)} days falling (from ${day(w.peak)}), ${back}`;
+}
+
+/** Biggest falls and rises per day/week/month, and trades grouped by weekday and session. */
+function renderBreakdowns(m, sym) {
+  const out = h("div", {});
+  const periods = [["day", "Day"], ["week", "Week (Mon–Sun)"], ["month", "Month"]].filter(([k]) => m.periods && m.periods[k]);
+  const at = (k, iso) => (k === "month" ? new Date(iso).toLocaleDateString("en-GB", { month: "short", year: "numeric" }) : day(iso));
+  const tone = (v) => (v > 0 ? "gain" : v < 0 ? "loss" : "");
+  if (periods.length) out.appendChild(h("details", { class: "chart" }, h("summary", {}, "Biggest falls and rises"),
+    h("div", { class: "table-wrap" }, h("table", { class: "trades" },
+      h("thead", {}, h("tr", {}, h("th", {}, ""), h("th", { class: "num" }, "Biggest fall"), h("th", { class: "num" }, "Biggest rise"))),
+      h("tbody", {}, periods.map(([k, label]) => {
+        const p = m.periods[k];
+        return h("tr", {}, h("th", { scope: "row" }, label),
+          h("td", { class: "num " + tone(p.worst) }, `${signed(p.worst, "%")} (${at(k, p.worst_at)})`),
+          h("td", { class: "num " + tone(p.best) }, `${signed(p.best, "%")} (${at(k, p.best_at)})`));
+      })))),
+    h("p", { class: "small muted" }, "Change in the balance within a single calendar day, week and month of the test.")));
+  const table = (title, rows, note) => h("div", {}, h("h3", {}, title),
+    h("div", { class: "table-wrap" }, h("table", { class: "trades" },
+      h("thead", {}, h("tr", {}, h("th", {}, ""), ["Trades", "Won", "Profit / loss", "Average R"].map((x) => h("th", { class: "num" }, x)))),
+      h("tbody", {}, rows.map((r) => h("tr", {}, h("th", { scope: "row" }, r.name), h("td", { class: "num" }, String(r.trades)),
+        h("td", { class: "num" }, num(r.won_pct, 0) + "%"), h("td", { class: "num " + tone(r.pnl) }, money(r.pnl, sym)),
+        h("td", { class: "num" }, signed(r.avg_r, "R"))))))),
+    note ? h("p", { class: "small muted" }, note) : null);
+  const groups = [];
+  if (m.by_weekday && m.by_weekday.length) groups.push(table("By weekday opened (UTC)", m.by_weekday));
+  if (m.by_session && m.by_session.length) groups.push(table("By session opened", m.by_session,
+    "Asia is Tokyo 09:00–18:00, London 08:00–16:30 London time, New York 08:00–17:00 New York time, each on its own clock so summer time is followed. " +
+    "Trades opened while London and New York are both open count as London + New York; weekends and the rest are Other hours."));
+  if (groups.length) out.appendChild(h("details", { class: "chart" }, h("summary", {}, "Trades by weekday and session"), ...groups,
+    h("p", { class: "small muted" }, "Each trade counts once, under the time it opened. Small groups can swing a lot from a few trades.")));
+  return out;
 }
 
 /** Bar chart of bucket counts ({from, to, count}), e.g. trades by R or by time held. */
