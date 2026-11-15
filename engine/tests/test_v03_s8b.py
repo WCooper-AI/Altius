@@ -44,7 +44,7 @@ def wait_done(client, job, timeout=60):
     end = time.time() + timeout
     while time.time() < end:
         st = client.get(f"/api/jobs/{job}", headers=H).json()
-        if st["status"] != "running":
+        if st["status"] not in ("queued", "running"):
             return st
         time.sleep(0.05)
     raise AssertionError("job did not finish")
@@ -148,10 +148,10 @@ def test_inline_jobs_progress_and_result():
     job = runner.start("me", slow_steps, 4, 0.02)
     assert runner.status("other", job) is None  # another owner can't see it
     end = time.time() + 5
-    while runner.status("me", job)["status"] == "running" and time.time() < end:
+    while runner.status("me", job)["status"] in ("queued", "running") and time.time() < end:
         time.sleep(0.01)
     st = runner.status("me", job)
-    assert st["status"] == "done" and st["done"] == 4 and st["total"] == 4 and st["result"] == {"steps": 4}
+    assert st["status"] == "completed" and st["done"] == 4 and st["total"] == 4 and st["result"] == {"steps": 4}
     assert st["note"] == "step 4"
 
 
@@ -165,7 +165,7 @@ def test_inline_jobs_cancel_and_busy():
     assert runner.cancel("other", job) is False
     assert runner.cancel("me", job) is True
     end = time.time() + 5
-    while runner.status("me", job)["status"] == "running" and time.time() < end:
+    while runner.status("me", job)["status"] in ("queued", "running") and time.time() < end:
         time.sleep(0.01)
     st = runner.status("me", job)
     assert st["status"] == "cancelled" and 0 < st["done"] < 200
@@ -178,7 +178,7 @@ def test_inline_jobs_error_is_reported():
     job = runner.start("me", boom)
     time.sleep(0.1)
     st = runner.status("me", job)
-    assert st["status"] == "error" and st["error"] == "no good"
+    assert st["status"] == "failed" and st["error"] == "no good"
 
 
 def test_pool_jobs_progress_and_cancel():
@@ -186,17 +186,17 @@ def test_pool_jobs_progress_and_cancel():
     try:
         job = runner.start("me", slow_steps, 3, 0.05)
         end = time.time() + 30
-        while runner.status("me", job)["status"] == "running" and time.time() < end:
+        while runner.status("me", job)["status"] in ("queued", "running") and time.time() < end:
             time.sleep(0.05)
         st = runner.status("me", job)
-        assert st["status"] == "done" and st["done"] == 3 and st["result"] == {"steps": 3}
+        assert st["status"] == "completed" and st["done"] == 3 and st["result"] == {"steps": 3}
         job = runner.start("me", slow_steps, 400, 0.05)
         with pytest.raises(jobs.Busy):  # one at a time per customer
             runner.start("me", slow_steps, 1, 0)
         time.sleep(0.3)
         assert runner.cancel("me", job)
         end = time.time() + 30
-        while runner.status("me", job)["status"] == "running" and time.time() < end:
+        while runner.status("me", job)["status"] in ("queued", "running") and time.time() < end:
             time.sleep(0.05)
         st = runner.status("me", job)
         assert st["status"] == "cancelled" and st["done"] < 400
@@ -218,7 +218,7 @@ def test_optimise_endpoint_runs_and_reports(client):
     assert r.status_code == 200, r.text
     assert r.json()["combinations"] == 6
     st = wait_done(client, r.json()["job"])
-    assert st["status"] == "done" and st["done"] == 6 and st["total"] == 6
+    assert st["status"] == "completed" and st["done"] == 6 and st["total"] == 6
     res = st["result"]
     assert res["combinations"] == 6 and len(res["rows"]) == 6 and res["currency"] == "£"
     assert all(len(row["values"]) == 2 for row in res["rows"])

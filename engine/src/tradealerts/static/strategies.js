@@ -556,9 +556,11 @@ function marketSection(data, changed) {
     const key = presetKey();
     const preset = app.meta.presets.find((x) => "preset:" + x.symbol === key);
     const builtIn = key.startsWith("auto:") ? marketByKey(m.symbol) : null;
+    const inst = builtIn ? (app.recipes.instruments || []).find((i) => i.key === builtIn.key) : null;
     append(body, [h("div", { class: "field", style: null }, h("label", {}, "Market"), sel,
       preset ? h("span", { class: "small muted" }, preset.note) : null,
-      builtIn ? h("span", { class: "small muted" }, `${builtIn.note}. Prices come from the source chosen in Settings.`) : null)]);
+      builtIn ? h("span", { class: "small muted" }, `${builtIn.note}. Prices come from the source chosen in Settings.`) : null,
+      inst ? h("span", { class: "small muted" }, instrumentLine(inst)) : null)]);
     if (key === "csv") {
       append(body, [csvFilePicker(m, () => { changed(); }),
         h("div", { class: "field" }, h("label", {}, "Name in alerts"),

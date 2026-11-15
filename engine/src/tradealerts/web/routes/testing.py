@@ -382,10 +382,16 @@ def optimise(request: Request, body: dict = Body(...), ws: Workspace = Depends(w
     extra = {"notes": notes, "currency": s.risk.symbol, "combinations": len(combos)}
     try:
         job = ctx.jobs.start(ws.owner, analysis.optimise, variants, df, fine, test_start, score, int(min_trades), workers, extra,
-                             float(holdout), int(folds))
+                             float(holdout), int(folds), kind="optimise")
     except Busy as exc:
         err(429, str(exc))
     return {"job": job, "combinations": len(combos)}
+
+
+@router.get("/api/jobs")
+def job_list(request: Request, ws: Workspace = Depends(workspace)):
+    """This workspace's background runs, newest first, without their results."""
+    return {"jobs": clean(ctx_of(request).jobs.list(ws.owner))}
 
 
 @router.get("/api/jobs/{job_id}")

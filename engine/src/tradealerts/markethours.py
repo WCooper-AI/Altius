@@ -11,7 +11,7 @@ from functools import lru_cache
 
 import pandas as pd
 
-from .recipes import MARKETS_BY_KEY
+from . import instruments
 
 NY = "America/New_York"
 CRYPTO_HINTS = ("BTC", "ETH", "SOL", "XRP", "LTC", "DOGE", "VCCY")
@@ -26,8 +26,8 @@ EXCHANGE_FALLBACK = {
 
 def exchange_for(symbol: str) -> str | None:
     """The exchange_calendars code of a market that only trades in exchange hours, else None."""
-    mk = MARKETS_BY_KEY.get(symbol)
-    return (mk or {}).get("exchange") or None
+    inst = instruments.get(symbol)
+    return inst.exchange if inst else None
 
 
 @lru_cache(maxsize=16)
@@ -84,9 +84,9 @@ def _over_weekend(local: pd.Timestamp, next_open_local: pd.Timestamp) -> bool:
 
 
 def trades_24_7(symbol: str) -> bool:
-    mk = MARKETS_BY_KEY.get(symbol)
-    if mk:
-        return mk.get("group") == "Crypto"
+    inst = instruments.get(symbol)
+    if inst:
+        return inst.group == "Crypto"
     up = (symbol or "").upper()
     return any(h in up for h in CRYPTO_HINTS)
 

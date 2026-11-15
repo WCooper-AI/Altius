@@ -7,6 +7,13 @@
 
 const recipeById = (id) => app.recipes.recipes.find((r) => r.id === id);
 const marketByKey = (k) => app.recipes.markets.find((m) => m.key === k);
+/* One line of facts about a built-in market: price step, sizes, margin and hours. */
+function instrumentLine(i) {
+  const parts = [`Price step ${i.tick_size} (${i.tick_value} ${i.quote} per 1 of size)`, `smallest size ${i.min_size}, in steps of ${i.size_step}`];
+  if (i.margin_pct != null) parts.push(`usual margin ${i.margin_pct}%`);
+  if (i.hours) parts.push(i.hours);
+  return parts.join(" · ");
+}
 const RISK_CHOICES = [0.25, 0.5, 1, 2, 3];
 
 function scrollIntoViewSoft(el) {
