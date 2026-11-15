@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from . import fxrates, limits, timeframes
+from . import fxrates, limits, measures, timeframes
 from .data import find_jumps
 from .markethours import trades_24_7
 from .simulator import Event, Simulator
@@ -244,6 +244,8 @@ def compute_metrics(strategy: Strategy, trades: pd.DataFrame, equity: pd.Series,
     m["sharpe_ci"] = sharpe_ci(trades, equity, strategy.market.timeframe, m["sharpe"], symbol=strategy.market.symbol)
     m["longest_underwater_days"] = longest_underwater_days(equity)
     m["monthly_returns"] = monthly_returns(equity)
+    m.update(measures.extra(trades, equity, start_eq, df.index[0], df.index[-1], m["max_drawdown_pct"],
+                            strategy.market.timeframe))
     return m
 
 
@@ -435,15 +437,7 @@ def longest_underwater_days(equity: pd.Series) -> float:
 def monthly_returns(equity: pd.Series) -> list[dict]:
     """% change of the balance per calendar month, grouped by year, with a year-to-date column
     (the change over that year's months in the test)."""
-    if len(equity) < 2:
-        return []
-    eq = equity.copy()
-    if eq.index.tz is None:
-        eq.index = eq.index.tz_localize("UTC")
-    ends = eq.resample("ME").last().dropna()
-    starts = ends.shift(1)
-    starts.iloc[0] = float(eq.iloc[0])  # the first month starts from the opening balance
-    pct = (ends / starts - 1) * 100
+    pct = measures.period_changes(equity, "ME")  # the first month starts from the opening balance
     out: dict[int, dict] = {}
     for stamp, v in pct.items():
         y = out.setdefault(int(stamp.year), {"year": int(stamp.year), "months": [None] * 12, "ytd": 0.0})

@@ -75,6 +75,44 @@ function versionSentence(data) {
   } catch (_) { return null; }
 }
 
+/** Backtest 2 to 4 kept versions over one period and show their results side by side. */
+function versionResults(versions, load) {
+  const chosen = new Set();
+  const out = h("div", { "aria-live": "polite" });
+  const period = periodPicker({ custom: true });
+  const run = h("button", { class: "primary", type: "button" }, "Backtest these versions");
+  const picks = h("div", { class: "pick-list" }, versions.map((v) => h("label", { class: "pick" },
+    h("input", { type: "checkbox", onchange: (e) => {
+      if (e.target.checked) {
+        if (chosen.size >= 4) { e.target.checked = false; toast("Compare up to 4 versions at a time", true); return; }
+        chosen.add(v.version_no);
+      } else chosen.delete(v.version_no);
+    } }),
+    h("span", {}, h("strong", {}, `Version ${v.version_no}`), h("span", { class: "small muted" }, ` ${v.note || "Saved"}, ${when(v.saved_at)}`)))));
+  run.addEventListener("click", async () => {
+    if (chosen.size < 2) { toast("Tick 2 to 4 versions", true); return; }
+    run.disabled = true;
+    const nos = [...chosen].sort((a, b) => a - b);
+    const results = [];
+    let no = null;
+    try {
+      for (const [i, n] of nos.entries()) {
+        no = n;
+        clear(out).appendChild(h("p", { class: "loading" }, `Backtesting ${i + 1} of ${nos.length}…`));
+        const v = await load(n);
+        results.push({ name: `Version ${n}`, res: await POST("/backtest", { data: v.data, ...period.value() }) });
+      }
+      clear(out).appendChild(renderCompare(results, { versions: true }));
+    } catch (e) { clear(out).appendChild(h("p", { class: "error-box" }, `Version ${no}: ${e.message}`)); }
+    finally { run.disabled = false; }
+  });
+  return h("div", { class: "panel" },
+    h("section", { class: "section" }, h("h2", {}, "Compare results"),
+      h("p", { class: "small muted" }, "Tick two to four versions to backtest each one over the same period and see the numbers side by side."),
+      picks, h("div", { class: "bt-controls" }, period, run)),
+    h("section", { class: "section" }, out));
+}
+
 async function viewHistory(id) {
   setNav("strategies");
   const [rec, list] = await Promise.all([GET("/strategies/" + encodeURIComponent(id)),
@@ -149,6 +187,7 @@ async function viewHistory(id) {
     versions.length
       ? h("div", { class: "history" }, h("div", { class: "panel" }, h("section", { class: "section" }, items)), detail)
       : h("div", { class: "panel" }, h("div", { class: "empty" }, h("p", {}, "No versions kept yet. One is kept each time the strategy is saved."))),
+    versions.length >= 2 ? versionResults(versions, load) : null,
   ]);
   if (versions.length) await show(selected);
 }
