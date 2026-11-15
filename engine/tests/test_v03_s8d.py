@@ -45,7 +45,7 @@ def wait_done(client, job, timeout=60):
     end = time.time() + timeout
     while time.time() < end:
         st = client.get(f"/api/jobs/{job}", headers=H).json()
-        if st["status"] != "running":
+        if st["status"] not in ("queued", "running"):
             return st
         time.sleep(0.05)
     raise AssertionError("job did not finish")
@@ -191,7 +191,7 @@ def test_api_job_result_carries_holdout_and_walk_forward(client):
     r = client.post("/api/optimise", json=opt_body(holdout_pct=30, walk_forward=3), headers=H)
     assert r.status_code == 200, r.text
     st = wait_done(client, r.json()["job"])
-    assert st["status"] == "done", st
+    assert st["status"] == "completed", st
     res = st["result"]
     assert res["holdout"]["pct"] == 30 and res["walk_forward"]["folds"] == 3
     assert all("train" in row and "holdout" in row and "_trades" not in row for row in res["rows"])

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Callable
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -28,6 +29,7 @@ from ..workspace import Workspace
 from .auth import Auth
 from .auth import router as auth_router
 from .common import appearance_from_raw, err
+from .models import plain_errors
 from .context import AppContext, SelfHostContext
 from .routes import backup, journal, markets, news, runs, settings, status, strategies, testing
 
@@ -53,6 +55,12 @@ def static_version(extra_dirs=()) -> str:
     return h.hexdigest()[:10]
 
 
+# The API's version. Requests may name it (/api/v1/...) or not (/api/...); a change that
+# breaks existing callers gets a new number, and the old prefix keeps working.
+API_VERSION = "1"
+API_V1 = "/api/v1/"
+
+
 def build_app(ctx: AppContext, *, authorize: Callable[[Request], Response | None],
               extra_routers=(), allowed_hosts: set[str] | None = None, csrf_exempt: tuple[str, ...] = (),
               extra_static: dict[str, Path] | None = None) -> FastAPI:
@@ -61,9 +69,16 @@ def build_app(ctx: AppContext, *, authorize: Callable[[Request], Response | None
     app.state.runner = ctx.runner  # older name
     app.state.shutdown = None      # older name for ctx.shutdown
 
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request: Request, exc: RequestValidationError):
+        return JSONResponse({"detail": plain_errors(exc.errors())}, 422)
+
     @app.middleware("http")
     async def guard(request: Request, call_next):
-        path = request.url.path
+        path = request.scope["path"]
+        if path.startswith(API_V1):  # /api/v1/... is the same API as /api/...
+            path = "/api/" + path[len(API_V1):]
+            request.scope["path"], request.scope["raw_path"] = path, path.encode()
         if allowed_hosts is not None and request.headers.get("host", "") not in allowed_hosts:
             return JSONResponse({"detail": "Unknown host"}, 421)
         if path.startswith("/api/"):
@@ -80,6 +95,7 @@ def build_app(ctx: AppContext, *, authorize: Callable[[Request], Response | None
         response.headers["Content-Security-Policy"] = CSP
         if path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+            response.headers["API-Version"] = API_VERSION
         elif path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache"  # always check for a newer copy
         return response

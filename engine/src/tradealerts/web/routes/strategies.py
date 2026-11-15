@@ -11,7 +11,7 @@ import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import Response
 
-from ... import indicators, rules
+from ... import indicators, instruments, rules
 from ...recipes import MARKETS, RECIPES, RecipeError, build_strategy, preview_strategy, still_matches_recipe
 from ...strategy import (ID_RE, StrategyError, dump_strategy, load_strategy, read_raw, strategy_files,
                          upgrade_legacy_market)
@@ -88,7 +88,8 @@ def example(name: str):
 
 @router.get("/api/recipes")
 def recipes():
-    return {"recipes": [r.public() for r in RECIPES], "markets": MARKETS}
+    return {"recipes": [r.public() for r in RECIPES], "markets": MARKETS,
+            "instruments": [i.public() for i in instruments.INSTRUMENTS.values()]}
 
 
 @router.post("/api/recipes/preview")

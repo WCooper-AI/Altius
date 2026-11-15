@@ -414,8 +414,8 @@ def strategy_from_dict(data: dict, sid: str = "", path: Path | None = None, raw_
         "risk",
     )
     # Built-in markets know their own point value, typical spread and funding; a blank uses those.
-    from .recipes import MARKETS_BY_KEY
-    builtin = MARKETS_BY_KEY.get(market.symbol, {}) if provider == "auto" else {}
+    from . import instruments
+    builtin = instruments.defaults(market.symbol) if provider == "auto" else {}
 
     def given(d: dict, key: str, fallback):
         return fallback if d.get(key) in (None, "") and key not in ("account_size", "risk_per_trade_pct") \
@@ -427,8 +427,8 @@ def strategy_from_dict(data: dict, sid: str = "", path: Path | None = None, raw_
         account_size=_number(r.get("account_size", 10_000), "risk.account_size", 0.01),
         risk_per_trade_pct=_number(r.get("risk_per_trade_pct", 0.5), "risk.risk_per_trade_pct", 0.0001),
         point_value=_number(given(r, "point_value", builtin.get("point_value", 1.0)), "risk.point_value", 1e-9),
-        size_step=_number(given(r, "size_step", 0.01), "risk.size_step", 0),
-        min_size=_number(given(r, "min_size", 0.01), "risk.min_size", 0),
+        size_step=_number(given(r, "size_step", builtin.get("size_step", 0.01)), "risk.size_step", 0),
+        min_size=_number(given(r, "min_size", builtin.get("min_size", 0.01)), "risk.min_size", 0),
         max_size=_number(r.get("max_size"), "risk.max_size", 0, allow_none=True),
         compound=bool(r.get("compound", True)),
         currency=str(r.get("currency") or "GBP"),

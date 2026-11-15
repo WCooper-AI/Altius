@@ -6,13 +6,14 @@ import os
 import zoneinfo
 
 import pandas as pd
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Depends, Request
 
-from ... import compute, dataquality, markethours, timeframes
+from ... import compute, dataquality, instruments, markethours, timeframes
 from ... import data as data_mod
 from ...recipes import MARKETS, MARKETS_BY_KEY
 from ...workspace import Workspace
 from ..common import clean, ctx_of, err, workspace
+from ..models import Deleted, PriceAlert, PriceAlertEdit, PriceAlertIn, PriceAlertList
 from ..strategy_io import SAFE_FILE, load
 
 router = APIRouter()
@@ -144,63 +145,41 @@ def candles(request: Request, market: str = "", strategy: str = "", timeframe: s
 # ---------------------------------------------------------------- price alerts
 
 
-def checked_alert(body: dict) -> dict:
-    direction = body.get("direction")
-    if direction not in ("above", "below"):
-        err(422, "Choose above or below")
-    price = body.get("price")
-    if isinstance(price, bool) or not isinstance(price, (int, float)) or price <= 0:
-        err(422, "Fill in the price")
-    repeat = body.get("repeat") or "once"
-    if repeat not in ("once", "every"):
-        err(422, "Choose once or every time")
-    cooldown = body.get("cooldown_minutes", 60)
-    if isinstance(cooldown, bool) or not isinstance(cooldown, (int, float)) or not 0 <= cooldown <= 7 * 24 * 60:
-        err(422, "The cooldown must be between 0 minutes and 7 days")
-    return {"direction": direction, "price": float(price), "note": str(body.get("note") or "")[:200],
-            "repeat": repeat, "cooldown_minutes": int(cooldown), "cross": bool(body.get("cross", False))}
-
-
-@router.get("/api/price-alerts")
+@router.get("/api/price-alerts", response_model=PriceAlertList)
 def list_price_alerts(market: str = "", ws: Workspace = Depends(workspace)):
     with ws.store(create=False) as store:
         alerts = store.price_alerts(market=market or None) if store else []
     return clean({"alerts": alerts, "poll_minutes": ws.config().poll_minutes})
 
 
-@router.post("/api/price-alerts", status_code=201)
-def add_price_alert(body: dict = Body(...), ws: Workspace = Depends(workspace)):
-    mk = MARKETS_BY_KEY.get(str(body.get("market")))
-    if not mk:
-        err(422, "Choose a market")
-    a = checked_alert(body)
+@router.post("/api/price-alerts", status_code=201, response_model=PriceAlert)
+def add_price_alert(body: PriceAlertIn, ws: Workspace = Depends(workspace)):
+    mk = MARKETS_BY_KEY[body.market]
     with ws.store() as store:
         limit = ws.limits.max_price_alerts
         if limit is not None and len(store.price_alerts(active_only=True)) >= limit:
             err(409, f"You have {limit} price alerts waiting, the most this plan allows. Remove one first.")
-        return clean(store.add_price_alert(mk["key"], mk["label"], a["direction"], a["price"], a["note"],
-                                           a["repeat"], a["cooldown_minutes"], a["cross"]))
+        return clean(store.add_price_alert(mk["key"], mk["label"], **body.fields()))
 
 
-@router.put("/api/price-alerts/{alert_id}")
-def edit_price_alert(alert_id: int, body: dict = Body(...), ws: Workspace = Depends(workspace)):
+@router.put("/api/price-alerts/{alert_id}", response_model=PriceAlert)
+def edit_price_alert(alert_id: int, body: PriceAlertEdit, ws: Workspace = Depends(workspace)):
     with ws.store() as store:
         old = store.price_alert(alert_id)
         if not old:
             err(404, "No alert with that id")
-        a = checked_alert(body)
-        active = bool(body.get("active", True))
         limit = ws.limits.max_price_alerts
-        if active and not old["active"] and limit is not None and len(store.price_alerts(active_only=True)) >= limit:
+        if body.active and not old["active"] and limit is not None and len(store.price_alerts(active_only=True)) >= limit:
             err(409, f"You have {limit} price alerts waiting, the most this plan allows. Remove one first.")
         now = pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")
         # editing or switching back on re-arms it from now
-        store.update_price_alert(alert_id, **{**a, "cross": 1 if a["cross"] else 0}, active=1 if active else 0,
+        store.update_price_alert(alert_id, **{**body.fields(), "cross": 1 if body.cross else 0},
+                                 active=1 if body.active else 0,
                                  checked_to=now, triggered_at=None, triggered_price=None, last_fired_at=None)
         return clean(store.price_alert(alert_id))
 
 
-@router.delete("/api/price-alerts/{alert_id}")
+@router.delete("/api/price-alerts/{alert_id}", response_model=Deleted)
 def delete_price_alert(alert_id: int, ws: Workspace = Depends(workspace)):
     with ws.store() as store:
         store.delete_price_alert(alert_id)
@@ -281,4 +260,5 @@ def delete_upload(name: str, ws: Workspace = Depends(workspace)):
 
 @router.get("/api/markets")
 def markets():
-    return {"markets": MARKETS}
+    """The built-in markets; ``instruments`` adds each one's price step, sizes, hours and costs."""
+    return {"markets": MARKETS, "instruments": [i.public() for i in instruments.INSTRUMENTS.values()]}

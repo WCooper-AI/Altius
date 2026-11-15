@@ -7,6 +7,10 @@ one customer's long test queues behind their own, not everyone's.
 Long jobs (the optimiser) use ``start`` instead of ``run``: the job runs in the
 background, reports its progress through a ``Progress`` object, and can be cancelled.
 The function given to ``start`` receives the ``Progress`` as its first argument.
+Each job goes queued -> running -> completed / failed / cancelled, and its status
+reports when it was created, started and finished, how long it waited and ran, the CPU
+time it used where it ran (not counting any helper processes it starts), and what went
+wrong if it failed.
 """
 
 from __future__ import annotations
@@ -58,39 +62,65 @@ class Progress:
             raise Cancelled("Stopped")
 
 
+def _iso(t: float | None) -> str | None:
+    return None if t is None else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
 class _Job:
-    def __init__(self, owner: str, progress: Progress):
+    """One background job: queued -> running -> completed / failed / cancelled."""
+
+    def __init__(self, owner: str, progress: Progress, kind: str = "job"):
         self.id = secrets.token_urlsafe(9)
         self.owner = owner
+        self.kind = kind
         self.progress = progress
-        self.status = "running"      # running | done | cancelled | error
+        self.final: str | None = None  # completed | failed | cancelled, once it has finished
         self.result: Any = None
         self.error: str | None = None
-        self.started = time.time()
+        self.error_type: str | None = None
+        self.created = time.time()
         self.finished: float | None = None
+        self.timed_out: float | None = None  # the limit in seconds, when the watchdog stopped it
+        self.future = None
+
+    @property
+    def status(self) -> str:
+        if self.final:
+            return self.final
+        return "running" if self.progress.state.get("started") else "queued"
 
     def finish(self, result=None, error: BaseException | None = None) -> None:
         if error is None:
-            self.status, self.result = "done", result
+            self.final, self.result = "completed", result
+        elif self.timed_out:
+            self.final, self.error_type = "failed", "TimedOut"
+            self.error = f"It ran for longer than the {self.timed_out / 60:g}-minute limit, so it was stopped."
         elif isinstance(error, Cancelled) or self.progress.cancelled:
-            self.status = "cancelled"
+            self.final = "cancelled"
         else:
-            self.status, self.error = "error", str(error) or error.__class__.__name__
+            self.final, self.error = "failed", str(error) or error.__class__.__name__
+            self.error_type = error.__class__.__name__
         self.finished = time.time()
 
-    def public(self) -> dict:
+    def public(self, result: bool = True) -> dict:
         st = self.progress.state
-        out = {"id": self.id, "status": self.status, "done": int(st.get("done", 0)), "total": int(st.get("total", 0)),
-               "note": st.get("note"), "seconds": round((self.finished or time.time()) - self.started, 1)}
-        if self.status == "done":
+        started = st.get("started")
+        now = self.finished or time.time()
+        out = {"id": self.id, "kind": self.kind, "status": self.status,
+               "done": int(st.get("done", 0)), "total": int(st.get("total", 0)), "note": st.get("note"),
+               "created": _iso(self.created), "started": _iso(started), "finished": _iso(self.finished),
+               "waited": round((started or now) - self.created, 1),
+               "seconds": round(now - started, 1) if started else 0.0,
+               "cpu_seconds": st.get("cpu")}
+        if self.final == "completed" and result:
             out["result"] = self.result
-        if self.status == "error":
-            out["error"] = self.error
+        if self.final == "failed":
+            out["error"], out["error_type"] = self.error, self.error_type
         return out
 
 
 class _JobTable:
-    """Bookkeeping shared by both runners: look up, report and cancel background jobs."""
+    """Bookkeeping shared by both runners: look up, list, report and cancel background jobs."""
 
     def __init__(self):
         self._jobs: dict[str, _Job] = {}
@@ -112,20 +142,37 @@ class _JobTable:
         j = self._get(owner, job_id)
         return j.public() if j else None
 
+    def list(self, owner: str | None) -> list[dict]:
+        """This owner's jobs, newest first, without their results."""
+        with self._jobs_lock:
+            mine = [j for j in self._jobs.values() if j.owner == (owner or "-")]
+        return [j.public(result=False) for j in sorted(mine, key=lambda j: j.created, reverse=True)]
+
     def cancel(self, owner: str | None, job_id: str) -> bool:
         j = self._get(owner, job_id)
         if not j:
             return False
         j.progress.flag.set()
+        if j.future is not None:
+            j.future.cancel()  # still waiting for a worker: it never starts
         return True
 
     def running(self, owner: str | None) -> int:
+        """Jobs this owner has queued or running."""
         with self._jobs_lock:
-            return sum(1 for j in self._jobs.values() if j.owner == (owner or "-") and j.status == "running")
+            return sum(1 for j in self._jobs.values() if j.owner == (owner or "-") and not j.final)
 
 
 def _call(fn: Callable, progress: Progress, *args):
-    return fn(progress, *args)
+    """Run one job where it was sent (a thread or a pool worker), recording when it started
+    and the CPU time it used there."""
+    progress.check()  # cancelled while it waited
+    progress.state["started"] = time.time()
+    cpu = time.thread_time()
+    try:
+        return fn(progress, *args)
+    finally:
+        progress.state["cpu"] = round(time.thread_time() - cpu, 2)
 
 
 class InlineJobs(_JobTable):
@@ -135,10 +182,10 @@ class InlineJobs(_JobTable):
     def run(self, owner: str | None, fn: Callable, *args) -> Any:
         return fn(*args)
 
-    def start(self, owner: str | None, fn: Callable, *args) -> str:
+    def start(self, owner: str | None, fn: Callable, *args, kind: str = "job") -> str:
         if self.running(owner):
             raise Busy("You already have an optimiser run going. Stop it or wait for it to finish.")
-        job = _Job(owner or "-", Progress({"done": 0, "total": 0}, threading.Event()))
+        job = _Job(owner or "-", Progress({"done": 0, "total": 0}, threading.Event()), kind)
         self._add(job)
 
         def work():
@@ -204,32 +251,40 @@ class PoolJobs(_JobTable):
         finally:
             self._free(sem)
 
-    def start(self, owner: str | None, fn: Callable, *args) -> str:
+    def start(self, owner: str | None, fn: Callable, *args, kind: str = "job") -> str:
         """Queue ``fn(progress, *args)`` on one worker; the job runs its steps one after another."""
         with self._lock:
             if self._manager is None:
                 self._manager = self._mp.Manager()
             manager = self._manager
         sem = self._slot(owner, 0.0)
-        job = _Job(owner or "-", Progress(manager.dict({"done": 0, "total": 0}), manager.Event()))
+        job = _Job(owner or "-", Progress(manager.dict({"done": 0, "total": 0}), manager.Event()), kind)
         self._add(job)
         try:
             fut = self.pool.submit(_call, fn, job.progress, *args)
         except BaseException:
             self._free(sem)
             raise
+        job.future = fut
+
+        def stop_runaway():
+            if not job.final:
+                job.timed_out = self.timeout
+                job.progress.flag.set()
+
+        watchdog = threading.Timer(self.timeout, stop_runaway)  # a runaway job is asked to stop
+        watchdog.daemon = True
 
         def done(f):
+            watchdog.cancel()
             try:
                 job.finish(f.result())
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001 - reported to the user through status()
                 job.finish(error=exc)
             finally:
                 self._free(sem)
 
         fut.add_done_callback(done)
-        watchdog = threading.Timer(self.timeout, job.progress.flag.set)  # a runaway job is asked to stop
-        watchdog.daemon = True
         watchdog.start()
         return job.id
 
