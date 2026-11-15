@@ -122,7 +122,7 @@ function Do-Desktop {
     }
     if ($missing) { Fail "Install the missing pieces above, open a new PowerShell window, then run setup.ps1 -Desktop again." }
     Bold "Building the desktop app. The first build takes 5 to 15 minutes..."
-    & $Py -m pip install --quiet pyinstaller
+    & $Py -m pip install --quiet "$Engine[yahoo,keychain]" pyinstaller
     $env:PATH = (Join-Path $Venv "Scripts") + ";" + $env:PATH
     Push-Location $DesktopDir
     try {

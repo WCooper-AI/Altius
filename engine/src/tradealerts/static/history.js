@@ -1,5 +1,13 @@
 /* Trading Alerts: a strategy's saved versions. See what changed between them and restore an old one. */
 
+import { $main, append, attempt, clear, clone, GET, h, POST, toast, when } from "./util.js";
+import { describeStrategy, renderParts } from "./describe.js";
+import { asGroup } from "./editor.js";
+import { withRunningChoice } from "./strategies.js";
+import { periodPicker } from "./testing.js";
+import { renderCompare } from "./compare.js";
+import { refreshStatus, setNav } from "./boot.js";
+
 "use strict";
 
 /** Line-by-line differences between two texts: [{ kind: "same" | "add" | "del", text }]. */
@@ -113,7 +121,7 @@ function versionResults(versions, load) {
     h("section", { class: "section" }, out));
 }
 
-async function viewHistory(id) {
+export async function viewHistory(id) {
   setNav("strategies");
   const [rec, list] = await Promise.all([GET("/strategies/" + encodeURIComponent(id)),
     GET(`/strategies/${encodeURIComponent(id)}/versions`)]);

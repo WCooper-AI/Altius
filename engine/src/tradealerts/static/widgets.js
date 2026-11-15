@@ -1,11 +1,15 @@
-"use strict";
-
 /* Trading Alerts web interface: Shared pieces: loading placeholders, charts, the command palette, the notifications bell.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { app, append, clear, GET, h, nf, POST, short, svg, toast, when } from "./util.js";
+import { pref, savePref } from "./testing.js";
+import { effectiveTheme, setTheme } from "./settings.js";
+import { journalDialog, viewJournal } from "./journal.js";
+import { refreshStatus, route, toggleRunnerPanel } from "./boot.js";
 
 // --------------------------------------------------------------------- loading skeletons
 
-function skeleton() {
+export function skeleton() {
   const block = (cls) => h("div", { class: "sk " + cls });
   return h("div", { class: "stack skeleton", "aria-busy": "true", "aria-label": "Loading" },
     h("div", {}, block("sk-title"), block("sk-line")),
@@ -14,7 +18,7 @@ function skeleton() {
 
 // --------------------------------------------------------------------- tiny charts
 
-function sparkline(points, tone) {
+export function sparkline(points, tone) {
   if (!points || points.length < 2) return null;
   const W = 96, H = 28;
   const ys = points.map((p) => p[1]);
@@ -28,7 +32,7 @@ function sparkline(points, tone) {
 
 // --------------------------------------------------------------------- full-screen charts
 
-function expandable(wrap, onKey = null) {
+export function expandable(wrap, onKey = null) {
   const btn = h("button", { type: "button", class: "icon chart-expand", title: "Full screen", "aria-label": "Full screen" }, "⤢");
   const close = () => { wrap.classList.remove("fullscreen"); document.body.classList.remove("has-fullscreen"); btn.textContent = "⤢"; document.removeEventListener("keydown", keys); };
   const keys = (e) => {
@@ -111,7 +115,7 @@ window.addEventListener("hashchange", () => { paletteCache = null; });
 const BELL_ICON = { closed: "✓", opened: "↗", signal: "◆", skipped: "!", price: "◎", news: "🗓", error: "!",
   strategy_saved: "✎", settings_changed: "⚙", alert_failed: "!",
   data_problem: "⚠", drawdown: "↘", near_level: "◎" };
-async function refreshBell(open = false) {
+export async function refreshBell(open = false) {
   const btn = document.getElementById("bell");
   const panel = document.getElementById("bell-panel");
   let res;
@@ -167,7 +171,7 @@ function mix(hex, toward, t) {
   return "#" + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, "0")).join("");
 }
 /** The accent, darkened or lightened just enough to be readable as text on the page (WCAG 4.5:1). */
-function readableAccent(accent, dark) {
+export function readableAccent(accent, dark) {
   const bg = dark ? "#0F151C" : "#E8EBEE";
   const toward = dark ? "#ffffff" : "#000000";
   let c = accent;
@@ -177,17 +181,17 @@ function readableAccent(accent, dark) {
 
 // --------------------------------------------------------------------- candlestick chart (live)
 
-function priceDigits(v) {
+export function priceDigits(v) {
   const a = Math.abs(v);
   return a >= 1000 ? 1 : a >= 100 ? 2 : a >= 10 ? 3 : a >= 1 ? 4 : 5;
 }
-function fmtPrice(v, d) { return v === null || v === undefined ? "–" : nf(d).format(v); }
+export function fmtPrice(v, d) { return v === null || v === undefined ? "–" : nf(d).format(v); }
 
 /**
  * Candles with trades, signals and price lines. Drag to scroll back, + and − to zoom,
  * click to pick a price (onPick). Call .update(data) with fresh data; the view stays put.
  */
-function candleChart(initial, { height = 380, onPick = null, title = null, onMark = null } = {}) {
+export function candleChart(initial, { height = 380, onPick = null, title = null, onMark = null } = {}) {
   const W = 900, H = height, AX = 70, BOT = 24, TOP = 8;
   const wrap = h("div", { class: "candles" });
   const readout = h("div", { class: "candle-readout" });
@@ -547,7 +551,7 @@ function candleChart(initial, { height = 380, onPick = null, title = null, onMar
 }
 
 /** Re-runs fn every `seconds` while this page is open and the tab is visible. */
-function every(seconds, fn) {
+export function every(seconds, fn) {
   const id = setInterval(() => { if (!document.hidden) fn(); }, seconds * 1000);
   app.timers.push(id);
   return id;

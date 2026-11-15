@@ -26,6 +26,18 @@
   market fill (entries, stops and rule exits, not limit targets). Trades get `slippage_cost`
   and the metrics `total_slippage`.
 
+## Interface and secrets
+
+- **The web interface is ES modules.** Each file in `static/` imports what it uses; the
+  page loads `boot.js`, which imports the rest. Imports carry the page's `?v=` version, and
+  `.js` is always served as `text/javascript` (some Windows setups said `text/plain`).
+- **Passwords and tokens can live in the computer's password store.** With the optional
+  `keychain` extra (bundled with the desktop app), saving Settings moves alert tokens,
+  passwords, webhook addresses, ntfy topics and the OANDA token into Windows Credential
+  Manager, the macOS Keychain or the Linux Secret Service, leaving `keychain:` references in
+  `config.yaml`. Full backups carry the values; restoring stores them again. Settings says
+  where they are kept. `tradealerts serve --no-keychain` keeps them in `config.yaml`.
+
 ## Desktop app and testing
 
 - **Port handshake.** The engine binds its own socket and prints `TRADEALERTS_PORT=<n>`; the

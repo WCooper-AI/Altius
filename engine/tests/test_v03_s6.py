@@ -78,24 +78,29 @@ def test_signal_count_endpoint(client):
 
 
 JS_CHECK = r"""
-const vm = require("vm"), fs = require("fs");
-const ctx = { console, document: { getElementById: () => null, body: { appendChild() {} } }, app: {} };
-vm.createContext(ctx);
-for (const f of ["util.js", "describe.js", "editor.js"]) vm.runInContext(fs.readFileSync(process.argv[1] + "/" + f, "utf8"), ctx);
-vm.runInContext("app.meta = " + JSON.stringify({ indicators: [{ name: "rsi", label: "RSI", params: { period: 14 }, types: { period: "int" } }], fields: ["close"] }), ctx);
-const [neg, custom, grp] = JSON.parse(process.argv[2]);
+import { pathToFileURL } from "node:url";
+const [dir, stub, cases] = process.argv.slice(1);
+await import(pathToFileURL(stub).href);
+const mod = async (f) => import(pathToFileURL(dir + "/" + f).href);
+const { app } = await mod("util.js");
+const { describeCondition } = await mod("describe.js");
+const { groupKind, isNegatedLeaf, editableLeaf } = await mod("editor.js");
+app.meta = { indicators: [{ name: "rsi", label: "RSI", params: { period: 14 }, types: { period: "int" } }], fields: ["close"] };
+const [neg, custom, grp] = JSON.parse(cases);
 const text = (parts) => parts.map((p) => (typeof p === "string" ? p : (p && p.m) || "")).join("");
 console.log(JSON.stringify({
-  negKind: ctx.groupKind(neg), negLeaf: ctx.isNegatedLeaf(neg), negEditable: ctx.editableLeaf(neg),
-  customLeaf: ctx.isNegatedLeaf(custom), customEditable: ctx.editableLeaf(custom),
-  grpKind: ctx.groupKind(grp), negDesc: text(ctx.describeCondition(neg)), custDesc: text(ctx.describeCondition(custom)),
+  negKind: groupKind(neg), negLeaf: isNegatedLeaf(neg), negEditable: editableLeaf(neg),
+  customLeaf: isNegatedLeaf(custom), customEditable: editableLeaf(custom),
+  grpKind: groupKind(grp), negDesc: text(describeCondition(neg)), custDesc: text(describeCondition(custom)),
 }));
+process.exit(0);
 """
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_editor_js_handles_negated_leaves():
-    out = subprocess.run(["node", "-e", JS_CHECK, "--", str(STATIC),
+    out = subprocess.run(["node", "--input-type=module", "-e", JS_CHECK, "--", str(STATIC),
+                          str(Path(__file__).parent / "js" / "browser_stub.mjs"),
                           json.dumps([NEGATED_LEAF, CUSTOM_NODE, {"not": {"any": []}}])],
                          capture_output=True, text=True)
     assert out.returncode == 0, out.stderr

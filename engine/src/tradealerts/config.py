@@ -14,6 +14,8 @@ from pathlib import Path
 
 import yaml
 
+from . import keychain
+
 _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 PATH_KEYS = ("strategies_dir", "data_dir", "reports_dir", "state_db")
@@ -108,7 +110,7 @@ def load_config(path: str | Path | None = None, *, must_exist: bool | None = Non
     if extra:
         raise ConfigError(f"{p}: unknown key(s) {', '.join(sorted(extra))}")
     if trusted:
-        data = expand_env(data)
+        data = keychain.reveal(expand_env(data))
     else:
         data = {k: v for k, v in data.items() if k not in PATH_KEYS}
     base = p.resolve().parent

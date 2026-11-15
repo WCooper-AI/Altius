@@ -1,7 +1,9 @@
-"use strict";
-
 /* Trading Alerts web interface: Appearance and the settings page.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, ApiError, app, append, ask, clear, day, DEL, GET, h, num, POST, PUT, toast, toastTimer, when } from "./util.js";
+import { readableAccent } from "./widgets.js";
+import { refreshStatus, setNav, signOut } from "./boot.js";
 
 // --------------------------------------------------------------------- appearance (theme, accent, density)
 
@@ -21,7 +23,7 @@ function inkFor(hex) {
   return lum > 0.36 ? "#0b0d12" : "#ffffff";
 }
 
-function applyAppearance(change) {
+export function applyAppearance(change) {
   const a = (app.appearance = { ...app.appearance, ...change });
   const root = document.documentElement;
   if (a.theme === "light" || a.theme === "dark") root.setAttribute("data-theme", a.theme);
@@ -39,18 +41,18 @@ function applyAppearance(change) {
   renderThemeToggle();
 }
 
-async function saveAppearance(change) {
+export async function saveAppearance(change) {
   applyAppearance(change);
   try { await PUT("/appearance", change); }
   catch (e) { toast("Appearance not saved: " + e.message, true); }
 }
 
-function effectiveTheme() {
+export function effectiveTheme() {
   const t = document.documentElement.getAttribute("data-theme");
   if (t) return t;
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
-function setTheme(choice) { saveAppearance({ theme: choice === "light" || choice === "dark" ? choice : "auto" }); }
+export function setTheme(choice) { saveAppearance({ theme: choice === "light" || choice === "dark" ? choice : "auto" }); }
 function renderThemeToggle() {
   const b = document.getElementById("theme-toggle");
   if (!b) return;
@@ -246,7 +248,7 @@ function backupSection() {
       "add them again here and switch the alerts back on."), status);
 }
 
-async function viewSettings() {
+export async function viewSettings() {
   setNav("settings");
   const s = await GET("/settings");
   const n = s.notifiers;
@@ -289,6 +291,9 @@ async function viewSettings() {
       priceDataSection(s),
       h("section", { class: "section" }, h("h2", {}, "Alerts"),
         h("p", { class: "section-note" }, "Save your settings before sending a test alert."),
+        "secrets_store" in s ? h("p", { class: "section-note" }, s.secrets_store
+          ? `Passwords, tokens and webhook addresses are kept in ${s.secrets_store}, not in config.yaml.`
+          : "Passwords, tokens and webhook addresses are saved in config.yaml in the app's data folder.") : null,
         h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Phone (ntfy)"), h("p", { class: "small muted" }, "Install the ntfy app and subscribe to the same topic. On the public ntfy.sh server, pick a long random topic name.")),
           h("div", { class: "stack" }, enabled(n.ntfy, "Send alerts with ntfy"), h("div", { class: "fields" },
             text(n.ntfy, "server", "Server", { placeholder: "https://ntfy.sh" }),
@@ -357,7 +362,7 @@ async function viewSettings() {
  * Hide something straight away and delete it after a few seconds, unless Undo is pressed.
  * hide(true) hides it, hide(false) brings it back; run() does the real delete.
  */
-function undoable(label, hide, run) {
+export function undoable(label, hide, run) {
   hide(true);
   const t = document.getElementById("toast");
   let undone = false;
@@ -426,9 +431,9 @@ function newsSection() {
 // --------------------------------------------------------------------- edition helpers
 
 /** The hosted (sign-in) edition, rather than the self-hosted app. */
-function isHosted() { return !!app.session && app.session.edition === "cloud"; }
+export function isHosted() { return !!app.session && app.session.edition === "cloud"; }
 /** What this edition allows: data sources, minimum check interval, plan limits. */
-function limits() { return (app.session && app.session.limits) || (app.meta && app.meta.limits) || {}; }
+export function limits() { return (app.session && app.session.limits) || (app.meta && app.meta.limits) || {}; }
 
 function accountSection() {
   if (isHosted() && window.cloudAccount) return window.cloudAccount.settingsSection();
@@ -450,7 +455,7 @@ async function uploadCsv(file) {
 }
 
 /** A button that uploads a CSV of candles, then calls done(result). */
-function csvUploadButton(done, label = "Upload a CSV file…") {
+export function csvUploadButton(done, label = "Upload a CSV file…") {
   const file = h("input", { type: "file", accept: ".csv,text/csv", hidden: true });
   const btn = h("button", { type: "button", onclick: () => file.click() }, label);
   file.addEventListener("change", async () => {

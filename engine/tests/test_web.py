@@ -37,10 +37,9 @@ def test_index_and_security_headers(client):
     assert r.status_code == 200 and "Altius" in r.text
     assert "default-src 'self'" in r.headers["content-security-policy"]
     assert r.headers["x-frame-options"] == "DENY"
-    from tradealerts.web.app import SCRIPTS
-    for name in SCRIPTS:  # every interface script is linked from the page and served
-        assert f"/static/{name}?v=" in r.text
-        assert client.get(f"/static/{name}").status_code == 200
+    from tradealerts.web.app import ENTRY
+    assert f'<script type="module" src="/static/{ENTRY}?v=' in r.text  # boot.js imports the rest
+    assert client.get(f"/static/{ENTRY}").status_code == 200
 
 
 def test_post_without_csrf_header_is_blocked(client):

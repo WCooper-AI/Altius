@@ -1,14 +1,25 @@
-"use strict";
-
 /* Trading Alerts web interface: The dashboard and each forward test's page.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, app, append, ask, attempt, clear, day, DEL, GET, h, money, num, POST, signed, stageTag, toast, when } from "./util.js";
+import { checksText, doingText, hhmm, marketText, positionText, reopenText, signedMoney, stateBadge, stateLine,
+  statusOf } from "./describe.js";
+import { choiceSelect } from "./editor.js";
+import { viewStrategies } from "./strategies.js";
+import { lineChart, periodPicker, pref, savePref } from "./testing.js";
+import { undoable } from "./settings.js";
+import { candleChart, every } from "./widgets.js";
+import { hh } from "./markets.js";
+import { journalDialog } from "./journal.js";
+import { untilText } from "./news.js";
+import { refreshStatus, setNav, toggleRunnerPanel } from "./boot.js";
 
 // --------------------------------------------------------------------- dashboard (forward tests)
 
 const EVERY_TEXT = { "5m": "every 5 minutes", "15m": "every 15 minutes", "30m": "every 30 minutes", "1h": "every hour",
   "2h": "every 2 hours", "4h": "every 4 hours", "1d": "once a day" };
 
-function ago(iso) {
+export function ago(iso) {
   const ms = Date.now() - new Date(iso).getTime();
   const mins = Math.round(ms / 60000);
   if (mins < 60) return mins <= 1 ? "just now" : `${mins} minutes ago`;
@@ -187,7 +198,7 @@ function sessionTimeline(newsRes) {
   return box;
 }
 
-async function viewDashboard() {
+export async function viewDashboard() {
   setNav("dashboard");
   const [dash, list, settings, newsRes] = await Promise.all([GET("/dashboard"), GET("/strategies"),
     GET("/settings").catch(() => null), GET("/news/events?days=7").catch(() => null)]);
@@ -468,7 +479,7 @@ function paperPrefill(r, t) {
     currency: r.currency || null, paper_trade_id: t.id };
 }
 
-async function viewRun(id) {
+export async function viewRun(id) {
   setNav("dashboard");
   const r = await GET("/runs/" + encodeURIComponent(id));
   let direction = "long", alerts = false;

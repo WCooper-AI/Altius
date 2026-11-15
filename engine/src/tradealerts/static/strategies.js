@@ -1,7 +1,15 @@
-"use strict";
-
 /* Trading Alerts web interface: The strategies list and the full strategy editor (market, entry, exit, risk).
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, app, append, ask, attempt, choose, clear, clone, CURRENCY, day, DEL, GET, h, money, POST, PUT, toast } from "./util.js";
+import { describeCondition, describeStrategy, displayStatus, isBlank, partsText, pill, positionText, renderParts,
+  shareButtons, signedMoney, stateBadge, statusControls } from "./describe.js";
+import { asGroup, choiceSelect, groupEditor, groupItems, newComparison, numberInput, operandEditor, tzInput } from "./editor.js";
+import { analysisPanel, pathSettings, pref, renderBacktest, savePref, setPath } from "./testing.js";
+import { instrumentLine, marketByKey } from "./guided.js";
+import { csvUploadButton, limits } from "./settings.js";
+import { sparkline } from "./widgets.js";
+import { refreshStatus, setNav } from "./boot.js";
 
 // --------------------------------------------------------------------- page: strategies list
 
@@ -46,7 +54,7 @@ function createMenu({ big = false, label = "Create strategy" } = {}) {
   return h("span", { class: "menu-wrap" + (big ? " start" : "") }, file, btn, menu);
 }
 
-async function viewStrategies() {
+export async function viewStrategies() {
   setNav("strategies");
   const page = h("div");
   clear($main).appendChild(page);
@@ -196,7 +204,7 @@ function stillToChoose(d) {
 /** Run a save (or restore) of a strategy. If its trading rules changed while a forward test is running,
     the server asks first: let the user choose, then send it again with that choice.
     ``send(onRunning)`` makes the request. Resolves to its result, or null if the user cancelled. */
-async function withRunningChoice(send, { message = "This strategy has a forward test running, and you've changed its trading rules.",
+export async function withRunningChoice(send, { message = "This strategy has a forward test running, and you've changed its trading rules.",
   cancel = "Don't save" } = {}) {
   try { return await send(undefined); }
   catch (e) {
@@ -212,17 +220,17 @@ async function withRunningChoice(send, { message = "This strategy has a forward 
   }
 }
 
-function savedToast(r) {
+export function savedToast(r) {
   toast(r.forward_test === "restarted" ? "Changes saved. A fresh forward test has started"
     : r.forward_test === "kept" ? "Changes saved. The forward test uses the new rules from the next candle"
     : "Changes saved");
 }
 
-function historyLink(id) {
+export function historyLink(id) {
   return h("a", { class: "button quiet", href: "#/history/" + encodeURIComponent(id), title: "Earlier versions of this strategy" }, "History");
 }
 
-async function viewEditor(id, exampleName, preloaded, run) {
+export async function viewEditor(id, exampleName, preloaded, run) {
   setNav("strategies");
   let data, isNew = !id;
   if (preloaded) data = preloaded;
@@ -452,7 +460,7 @@ async function copyText(text, input) {
 }
 
 /** Ask before going live. If no phone alerts are set up yet, offer to set up ntfy in the same dialog. */
-async function confirmLive() {
+export async function confirmLive() {
   let status = app.status;
   try { status = await GET("/status"); } catch (_) { /* fall back to cached */ }
   const hasPhone = ((status && status.channels) || []).some((c) => c !== "console");
@@ -637,8 +645,8 @@ function csvFilePicker(m, changed) {
   return field;
 }
 
-const STOP_KINDS = { atr: "ATR multiple", percent: "Percent", points: "Points", level: "A price from a rule" };
-const TARGET_KINDS = { none: "No target", r_multiple: "Multiple of the risk (R)", atr: "ATR multiple", percent: "Percent", points: "Points", level: "A price from a rule" };
+export const STOP_KINDS = { atr: "ATR multiple", percent: "Percent", points: "Points", level: "A price from a rule" };
+export const TARGET_KINDS = { none: "No target", r_multiple: "Multiple of the risk (R)", atr: "ATR multiple", percent: "Percent", points: "Points", level: "A price from a rule" };
 
 function levelEditor(get, set, kinds, changed, label) {
   const wrap = h("div", { class: "inline" });
@@ -694,7 +702,7 @@ function exitSection(data, changed) {
     h("div", { class: "stack", style: null }, h("label", { class: "check", for: "exit-when" }, toggle, "Also close the trade when a rule is true"), whenBox));
 }
 
-const RISK_HELP = {
+export const RISK_HELP = {
   account_size: "The practice balance that backtests and forward tests start from. It doesn't have to match a real account, but using roughly what you'd trade with keeps sizes and costs realistic.",
   currency: "The currency of the balance and of all profit and loss figures. Usually your broker account's currency.",
   risk_per_trade_pct: "How much of the balance you'd lose if a trade hits its stop. The trade size is worked out from this. Many traders keep it small, often somewhere around 0.5% to 2%, because losing runs happen to every strategy.",
@@ -723,7 +731,7 @@ const RISK_HELP = {
 };
 
 /** A small (i) that explains a setting on hover or focus. */
-function infoTip(text) {
+export function infoTip(text) {
   if (!text) return null;
   const el = h("span", { class: "info", tabindex: "0", role: "button", "aria-label": "More about this: " + text }, "i");
   el.dataset.tip = text;
@@ -743,7 +751,7 @@ function showTip(target) {
   tipEl.style.left = left + "px";
   tipEl.style.top = (below ? r.bottom + 8 : r.top - 8 - tipEl.offsetHeight) + "px";
 }
-function hideTip() { if (tipEl) { tipEl.remove(); tipEl = null; } }
+export function hideTip() { if (tipEl) { tipEl.remove(); tipEl = null; } }
 document.addEventListener("pointerover", (e) => { const t = e.target.closest && e.target.closest(".info"); if (t) showTip(t); });
 document.addEventListener("pointerout", (e) => { if (e.target.closest && e.target.closest(".info")) hideTip(); });
 document.addEventListener("focusin", (e) => { if (e.target.classList && e.target.classList.contains("info")) showTip(e.target); });

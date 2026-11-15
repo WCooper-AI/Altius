@@ -1,9 +1,24 @@
-"use strict";
-
 /* Trading Alerts web interface: Sign in, the top bar, the router and start-up.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, ApiError, app, append, ask, clear, GET, h, hooks, POST, svg, toast } from "./util.js";
+import { hhmm, reopenText, stateBadge, viewImport } from "./describe.js";
+import { hideTip, viewEditor, viewStrategies } from "./strategies.js";
+import { viewCreate, viewSimple } from "./guided.js";
+import { ago, viewDashboard, viewRun } from "./dashboard.js";
+import { applyAppearance, saveAppearance, viewSettings } from "./settings.js";
+import { refreshBell, skeleton } from "./widgets.js";
+import { viewMarkets, viewMarketStats } from "./markets.js";
+import { viewJournal } from "./journal.js";
+import { viewPortfolio } from "./portfolio.js";
+import { viewNews } from "./news.js";
+import { viewCompare } from "./compare.js";
+import { viewHistory } from "./history.js";
+import { viewActivity } from "./activity.js";
 
 // --------------------------------------------------------------------- login
+
+hooks.signIn = showLogin;
 
 function showLogin() {
   document.getElementById("topbar").hidden = true;
@@ -25,7 +40,7 @@ function showLogin() {
 
 // --------------------------------------------------------------------- top bar + router
 
-function setNav(name) {
+export function setNav(name) {
   document.querySelectorAll("[data-nav]").forEach((a) => {
     if (a.dataset.nav === name) {
       a.setAttribute("aria-current", "page");
@@ -34,7 +49,7 @@ function setNav(name) {
   });
 }
 
-async function refreshStatus() {
+export async function refreshStatus() {
   refreshBell();
   const el = document.getElementById("runner");
   try { app.status = await GET("/status"); } catch (_) { return; }
@@ -65,7 +80,7 @@ async function refreshStatus() {
   if (open) drawRunnerPanel();
 }
 
-function toggleRunnerPanel(force) {
+export function toggleRunnerPanel(force) {
   const panel = document.getElementById("runner-panel");
   const show = force === undefined ? panel.hidden : force;
   panel.hidden = !show;
@@ -123,7 +138,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 let lastHash = location.hash;
-async function route() {
+export async function route() {
   for (const id of app.timers.splice(0)) clearInterval(id);
   for (const fn of app.cleanups.splice(0)) fn();
   hideTip();
@@ -232,7 +247,7 @@ window.addEventListener("beforeunload", (e) => {
 });
 
 let statusTimer = null;
-async function boot() {
+export async function boot() {
   try {
     app.session = await GET("/session");
     if (app.session.auth_required && !app.session.signed_in) { showLogin(); return; }
@@ -278,11 +293,12 @@ function showReadOnly() {
     h("a", { class: "button small primary", href: "#/account" }, "Subscribe")));
 }
 
-async function signOut() {
+export async function signOut() {
   try { await POST("/logout"); } catch (_) { /* signed out anyway */ }
   app.session = null;
   location.hash = "#/";
   boot();
 }
 
-boot();
+// After every module script on the page has run, so the hosted edition's account.js is in place.
+document.addEventListener("DOMContentLoaded", boot);

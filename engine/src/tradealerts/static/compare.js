@@ -1,7 +1,10 @@
-"use strict";
-
 /* Trading Alerts web interface: Comparing backtests side by side.
-   Loaded as plain scripts in order (see SCRIPTS in web/app.py); they share one scope. */
+   ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
+
+import { $main, append, clear, GET, h, num, POST, signed, svg, toast } from "./util.js";
+import { gridlines, periodPicker, pref, savePref } from "./testing.js";
+import { expandable } from "./widgets.js";
+import { setNav } from "./boot.js";
 
 // --------------------------------------------------------------------- compare backtests side by side
 
@@ -41,7 +44,7 @@ function multiChart(series, { title, fmt }) {
   return wrap;
 }
 
-async function viewCompare() {
+export async function viewCompare() {
   setNav("strategies");
   const list = await GET("/strategies");
   const ok = list.strategies.filter((x) => !x.error);
@@ -85,7 +88,7 @@ async function viewCompare() {
 
 /** Side by side results. With { versions: true } nothing is marked best, and two results get a
  * Change column (second minus first). Rows: [label, format, value, format a change]. */
-function renderCompare(results, { versions = false } = {}) {
+export function renderCompare(results, { versions = false } = {}) {
   const series = results.map((r) => {
     const start = r.res.metrics.start_equity;
     return { name: r.name, points: r.res.equity.map((p) => [p[0], (p[1] / start - 1) * 100]) };
