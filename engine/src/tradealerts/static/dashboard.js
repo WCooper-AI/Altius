@@ -505,6 +505,7 @@ async function viewRun(id) {
       actions),
     h("div", { class: "editor" },
       h("div", { class: "panel" }, h("section", { class: "section" },
+        stageTag("forward"),
         h("div", { class: "headline" },
           h("div", {}, h("div", { class: "big" }, money(r.balance, sym)), h("div", { class: "lbl" }, `Balance, from ${money(r.start_balance, sym)}`)),
           h("div", {}, h("div", { class: "big " + (tone === "flat" ? "" : tone) }, `${signedMoney(r.pnl, sym)}`), h("div", { class: "lbl" }, signed(r.pnl_pct, "%"))),

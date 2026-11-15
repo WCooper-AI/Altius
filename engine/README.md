@@ -10,6 +10,7 @@ runs it for one person; the hosted service runs it for many customers (see `clou
 src/tradealerts/
   strategy.py rules.py indicators.py   strategy files, the rule language, indicators
   simulator.py backtest.py analysis.py how trades fill; backtests; compare settings, luck check
+  stats.py invariants.py limits.py     luck-check and optimiser statistics; accounting checks; loss limits
   compute.py jobs.py                   the testing tools as plain functions; running them in workers
   data.py cache.py                     price data (Dukascopy, Yahoo, OANDA, CSV) and caching
   runner.py                            live checks: forward tests, alerts, price alerts, weekly report

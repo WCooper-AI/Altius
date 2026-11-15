@@ -186,7 +186,7 @@ def cmd_backtest(args) -> int:
     if args.luck:
         from .analysis import luck_check
         print("\nLuck check (resampled trades, both halves, random price paths)...")
-        out = luck_check(s, df, fine, start)
+        out = luck_check(s, df, fine, start, trials=max(1, args.trials))
         for c in out["checks"]:
             mark = "  -  " if c["passed"] is None else ("PASS " if c["passed"] else "FAIL ")
             print(f"{mark}{c['title']}")
@@ -194,6 +194,10 @@ def cmd_backtest(args) -> int:
             o = out["order"]
             print(f"     Worst drop with the same trades in other orders: typically {abs(o['median_dd']):.1f}%, "
                   f"1 in 20 orders {abs(o['bad_dd']):.1f}% or worse")
+        if out.get("deflated"):
+            d = out["deflated"]
+            print(f"     Deflated Sharpe ratio after {d['trials']:,} tr{'y' if d['trials'] == 1 else 'ies'}: "
+                  f"{d['probability']:.0%} chance the true per-trade Sharpe is above {d['bar']:.3f} (it was {d['sharpe']:.3f})")
         print(f"Passed {out['passed']} of {out['total']}. Passing makes luck less likely; it doesn't predict the future.")
     if not args.no_report:
         stamp = pd.Timestamp.now().strftime("%Y%m%d-%H%M%S")
@@ -346,6 +350,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", help="report folder")
     s.add_argument("--no-report", action="store_true")
     s.add_argument("--luck", action="store_true", help="also run the luck check (takes up to a minute)")
+    s.add_argument("--trials", type=int, default=1,
+                   help="with --luck: how many settings or versions you tried before this one (deflates the Sharpe ratio)")
     s.set_defaults(func=cmd_backtest)
 
     s = sub.add_parser("run", help="check strategies on every new bar and send alerts")
