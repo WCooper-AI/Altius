@@ -7,6 +7,7 @@ not just the installed package, so the whole module is skipped for an installed-
 from __future__ import annotations
 
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -114,9 +115,21 @@ def test_dev_install_extras_consistent():
 # --------------------------------------------------------------------- link checking (item 3)
 
 
+def _doc_pages() -> list[Path]:
+    """docs/*.md that git tracks, so a local untracked note doesn't fail the test; every file
+    when git isn't available (e.g. an unpacked release)."""
+    pages = sorted(DOCS.glob("*.md"))
+    try:
+        out = subprocess.run(["git", "ls-files", "docs"], cwd=ROOT, capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return pages
+    tracked = {Path(line).name for line in out.stdout.splitlines()}
+    return [p for p in pages if p.name in tracked] if tracked else pages
+
+
 def test_docs_readme_links_every_doc_page():
     text = (DOCS / "README.md").read_text(encoding="utf-8")
-    pages = {p.name for p in DOCS.glob("*.md") if p.name != "README.md"}
+    pages = {p.name for p in _doc_pages() if p.name != "README.md"}
     for page in pages:
         assert page in text, f"docs/README.md doesn't link {page}"
 
