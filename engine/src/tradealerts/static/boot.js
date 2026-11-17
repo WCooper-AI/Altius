@@ -48,7 +48,35 @@ export function setNav(name) {
       a.scrollIntoView({ block: "nearest", inline: "nearest" }); // keeps the tab visible on phones
     } else a.removeAttribute("aria-current");
   });
+  placePill(navPill, document.querySelector(".nav [aria-current]"), navPill.classList.contains("shown"));
 }
+
+// Animated tabs (after shitui's Animated Tab): an accent pill springs to the current page and a faint
+// one follows the pointer. Positions are set through the CSSOM, so the strict CSP is happy.
+const navEl = document.querySelector(".nav");
+const navPill = h("span", { class: "nav-pill", "aria-hidden": "true" });
+const navHover = h("span", { class: "nav-pill hover", "aria-hidden": "true" });
+navEl.prepend(navHover, navPill);
+function placePill(pill, a, animate) {
+  if (!a || !a.offsetWidth) { pill.classList.remove("shown"); return; }
+  pill.classList.toggle("still", !animate);
+  Object.assign(pill.style, { width: a.offsetWidth + "px", height: a.offsetHeight + "px", transform: `translate(${a.offsetLeft}px, ${a.offsetTop}px)` });
+  void pill.offsetWidth; // apply the jump before turning the animation back on
+  pill.classList.remove("still");
+  pill.classList.add("shown");
+}
+navEl.addEventListener("pointerover", (e) => {
+  const a = e.target.closest("[data-nav]");
+  if (!a || e.pointerType === "touch") return;
+  if (a.hasAttribute("aria-current")) { navHover.classList.remove("shown"); return; }
+  placePill(navHover, a, navHover.classList.contains("shown"));
+});
+navEl.addEventListener("pointerleave", () => navHover.classList.remove("shown"));
+navEl.addEventListener("click", () => navHover.classList.remove("shown"));
+// Re-measure without animating when the bar changes size (window resize, phone layout, fonts loading).
+const repin = () => placePill(navPill, navEl.querySelector("[aria-current]"), false);
+if (window.ResizeObserver) new ResizeObserver(repin).observe(navEl);
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") document.fonts.ready.then(repin);
 
 export async function refreshStatus() {
   refreshBell();

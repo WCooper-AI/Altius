@@ -3,7 +3,7 @@
 
 import { app, append, clear, day, GET, h, nf, POST, short, svg, toast, when } from "./util.js";
 import { pref, savePref } from "./testing.js";
-import { effectiveTheme, setTheme } from "./settings.js";
+import { effectiveTheme, revealSetting, setTheme, SETTINGS_INDEX } from "./settings.js";
 import { journalDialog, viewJournal } from "./journal.js";
 import { refreshStatus, route, toggleRunnerPanel } from "./boot.js";
 import { commandDialog } from "./cmdk.js";
@@ -49,6 +49,17 @@ export function expandable(wrap, onKey = null) {
   return btn;
 }
 
+// --------------------------------------------------------------------- retro pixel button
+
+/** A call-to-action button after shitui's Retro Pixel Button: an accent block with a pixel arrow slides across on hover. */
+export function pixelButton(label, attrs = {}) {
+  const arrow = svg("svg", { viewBox: "0 0 14 26", "aria-hidden": "true" });
+  for (const [x, y] of [[1, 3], [5, 7], [9, 11], [5, 15], [1, 19]]) arrow.appendChild(svg("rect", { x, y, width: 4, height: 4 }));
+  return h("button", { type: "button", ...attrs, class: ["pixel-button", attrs.class].filter(Boolean).join(" ") },
+    h("span", { class: "pixel-block", "aria-hidden": "true" }, arrow),
+    h("span", { class: "pixel-label" }, label));
+}
+
 // --------------------------------------------------------------------- command palette (Ctrl+K)
 
 let paletteCache = null;
@@ -76,18 +87,25 @@ async function openPalette() {
   ] };
   const markets = { heading: "Markets", items: app.recipes.markets.map((m) => ({ value: `${m.label} chart`, keywords: [m.key], hint: "Chart",
     onSelect: () => { savePref("ta-live-market", m.key); location.hash = "#/markets"; if (location.hash === "#/markets") route(); } })) };
+  const settings = { heading: "Settings", items: SETTINGS_INDEX.map(([title, section, find, words]) => ({
+    value: title, keywords: [section, "setting", ...words.split(" ")], hint: section, icon: navIcon("settings"),
+    onSelect: () => {
+      // Already on Settings: jump without reloading the page (which would lose unsaved edits).
+      if (location.hash.startsWith("#/settings") && document.querySelector("#main .save-bar")) setTimeout(() => revealSetting(section, find), 0);
+      else location.hash = `#/settings?in=${encodeURIComponent(section)}&find=${encodeURIComponent(find)}`;
+    } })) };
   const kbd = (t) => h("kbd", {}, t);
-  const menu = commandDialog([pages, actions, markets], {
+  const menu = commandDialog([pages, actions, settings, markets], {
     className: "palette", label: "Search and jump", placeholder: "Jump to a page, strategy or market, or run an action…", empty: "Nothing found.",
     footer: h("div", { class: "palette-hint small muted" }, kbd("↑"), kbd("↓"), " to choose ", kbd("Enter"), " to open ", kbd("Esc"), " to close"),
   });
   const closeOnNav = () => { if (menu.dialog.open) menu.close(); };
   window.addEventListener("hashchange", closeOnNav, { once: true });
-  if (paletteCache) { menu.setGroups([strategyGroup(paletteCache), pages, actions, markets]); return; }
+  if (paletteCache) { menu.setGroups([strategyGroup(paletteCache), pages, actions, settings, markets]); return; }
   menu.setLoading(true);
   try {
     paletteCache = await GET("/strategies");
-    if (menu.dialog.open) menu.setGroups([strategyGroup(paletteCache), pages, actions, markets]);
+    if (menu.dialog.open) menu.setGroups([strategyGroup(paletteCache), pages, actions, settings, markets]);
   } catch (_) { /* pages and actions still work */ }
   finally { menu.setLoading(false); }
 }

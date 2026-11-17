@@ -362,6 +362,53 @@ export async function viewSettings() {
   onSaved = () => { bar.hidden = true; app.isDirty = null; app.guard = null; };
   page.appendChild(bar);
   clear($main).appendChild(page);
+  // Opened from the command menu (#/settings?in=Section&find=Label): go straight to that setting.
+  const want = new URLSearchParams(location.hash.split("?")[1] || "");
+  if (want.get("find")) setTimeout(() => { revealSetting(want.get("in"), want.get("find")); history.replaceState(null, "", "#/settings"); }, 60);
+}
+
+// --------------------------------------------------------------------- settings search (command menu)
+
+/** [what to call it, section heading, label text on the page, extra search words]. Kept beside the page so they change together. */
+export const SETTINGS_INDEX = [
+  ["Theme", "Appearance", "Theme", "dark mode light mode appearance"],
+  ["Accent colour", "Appearance", "Accent colour", "color highlight amber"],
+  ["Spacing", "Appearance", "Spacing", "density compact"],
+  ["OANDA API token", "Price data", "OANDA API token", "broker key data source"],
+  ["OANDA account type", "Price data", "Account type", "practice live demo"],
+  ["ntfy alerts", "Alerts", "Send alerts with ntfy", "push phone notifications"],
+  ["Discord alerts", "Alerts", "Send alerts to Discord", "webhook"],
+  ["Telegram alerts", "Alerts", "Send alerts to Telegram", "bot chat"],
+  ["Slack alerts", "Alerts", "Send alerts to Slack", "webhook"],
+  ["Webhook alerts", "Alerts", "Send alerts to a webhook", "url http"],
+  ["Email alerts", "Alerts", "Send alerts and reports by email", "smtp mail"],
+  ["Print alerts in the server log", "Alerts", "Also print alerts in the server log", "console"],
+  ["How often to check", "Checking", "Look for newly closed candles", "poll interval minutes frequency"],
+  ["Weekly report", "Weekly report", "Send me a weekly report", "summary email"],
+  ["Daily summary", "Daily summary", "Send me a daily summary", "report email"],
+  ["Drawdown limit", "Warnings", "Drawdown limit", "warning loss percent"],
+  ["Near stop or target", "Warnings", "Near stop or target", "warning percent"],
+  ["Your price files", "Your price files", "", "csv upload data"],
+  ["News calendar", "News calendar", "", "economic events"],
+  ["Backup", "Backup", "", "export download restore"],
+  ["Signing in", "Signing in", "", "password account"],
+];
+
+/** Scroll to a setting on the open settings page, flash it and put the cursor in it. */
+export function revealSetting(section, find) {
+  let inSection = false, head = null, hit = null;
+  for (const el of $main.querySelectorAll("h2, label, .field")) {
+    if (el.tagName === "H2") { inSection = el.textContent.trim().startsWith(section); if (inSection && !head) head = el; continue; }
+    if (inSection && find && !hit && el.textContent.trim().startsWith(find)) hit = el;
+  }
+  const target = hit ? hit.closest(".field") || hit : head;
+  if (!target) { toast(`"${find || section}" isn't on this page`, true); return; }
+  target.scrollIntoView({ block: "center", behavior: "smooth" });
+  target.classList.remove("found");
+  void target.offsetWidth; // restart the flash
+  target.classList.add("found");
+  const control = hit && (hit.querySelector("input, select, textarea, button") || (hit.htmlFor && document.getElementById(hit.htmlFor)));
+  if (control) control.focus({ preventScroll: true });
 }
 
 // --------------------------------------------------------------------- undo instead of "are you sure?"

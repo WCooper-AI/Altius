@@ -55,3 +55,20 @@ def test_palette_uses_the_cmdk_module_and_attributes():
     assert 'import { commandDialog } from "./cmdk.js";' in widgets
     for part in ("[cmdk-input]", "[cmdk-list]", "[cmdk-group-heading]", '[cmdk-item][data-selected="true"]', "[cmdk-empty]"):
         assert part in css
+
+
+def test_every_searchable_setting_points_at_a_real_heading_and_label():
+    import re
+    src = (STATIC / "settings.js").read_text(encoding="utf-8")
+    index = src[src.index("export const SETTINGS_INDEX"):src.index("];", src.index("export const SETTINGS_INDEX"))]
+    rows = re.findall(r'\["([^"]+)", "([^"]+)", "([^"]*)", "[^"]*"\]', index)
+    assert len(rows) >= 15
+    for _title, section, find in rows:
+        assert f'h("h2", {{}}, "{section}")' in src, section
+        if find:
+            assert f'"{find}' in src, find   # the label text starts with it
+
+
+def test_palette_lists_settings():
+    widgets = (STATIC / "widgets.js").read_text(encoding="utf-8")
+    assert "SETTINGS_INDEX" in widgets and "revealSetting" in widgets
