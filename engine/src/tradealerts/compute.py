@@ -10,10 +10,11 @@ from __future__ import annotations
 import copy
 import math
 
+import numpy as np
 import pandas as pd
 
-from . import rules, analysis, dataquality
-from .backtest import run_backtest
+from . import rules, analysis, dataquality, stats
+from .backtest import bars_per_year, run_backtest
 from .report import warnings_for
 from .strategy import check_runtime, strategy_from_dict
 
@@ -156,6 +157,10 @@ def backtest(data: dict, df, fine, test_start, notes: list[str], split_pct: floa
         "currency": s.risk.symbol,
         "monte_carlo": analysis.monte_carlo(res.trades, s.risk.account_size, compound=s.risk.compound) if len(res.trades) >= 2 else None,
     }
+    res.metrics["ratio_ranges"] = linked_ranges(res.equity, res.metrics, s.market.timeframe, s.market.symbol)
+    # market states over the tested (in-sample) part, as the luck check shows them
+    tested = df if res.oos_metrics is None else df[df.index < res.split_date]
+    out["regimes"] = stats.regimes(tested, res.trades, test_start) if len(res.trades) else None
     if not len(res.trades):
         out["why_no_trades"] = analysis.why_no_trades(s, df, test_start)
     if res.oos_metrics is not None:
@@ -168,6 +173,22 @@ def backtest(data: dict, df, fine, test_start, notes: list[str], split_pct: floa
     out["data_fingerprint"] = dataquality.fingerprint(df)
     out["data_candles"] = len(df)
     return _clean(out)
+
+
+def linked_ranges(equity: pd.Series, metrics: dict, timeframe: str, symbol: str) -> dict | None:
+    """Sharpe and Sortino ranges that don't take returns as independent: a block bootstrap of the
+    candle-to-candle balance changes behind the headline ratios, with blocks at least as long as
+    the average trade (in candles), so one trade's candles, and trades that overlap, stay together."""
+    if not metrics.get("trades") or metrics.get("sharpe") is None or len(equity) < 3:
+        return None
+    r = equity.pct_change().dropna().to_numpy(dtype=float)
+    r = r[np.isfinite(r)]
+    held = metrics.get("avg_bars_held") or 0
+    block = max(stats.block_size(len(r)), int(math.ceil(held)))
+    out = stats.ratio_ranges(r, math.sqrt(bars_per_year(equity.index, timeframe, symbol=symbol)), block)
+    if out is not None:
+        out["overlapping_trades"] = int(metrics.get("overlapping_trades") or 0)
+    return out
 
 
 def sweep(variants: list[tuple], df, fine, test_start, currency: str, notes: list[str]) -> dict:

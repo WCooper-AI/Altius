@@ -138,6 +138,8 @@ def walk_forward(curves: list[tuple[object, pd.Series]], folds: int = 4) -> dict
         "average_pct": float(np.mean([x[0] for x in later])),
         "from": edges[1].isoformat(),
         "to": edges[-1].isoformat(),
+        "picked_from": len(curves),
+        "selection_note": hindsight_note(len(curves), "values"),
     }
 
 
@@ -1106,6 +1108,8 @@ def walk_forward_grid(rows: list[dict], score: str, min_trades: int, a: int, b: 
         "average_pct": float(np.mean([x[0] for x in later])),
         "from": pd.Timestamp(edges[1], tz="UTC").isoformat(),
         "to": pd.Timestamp(b - 1, tz="UTC").isoformat(),
+        "picked_from": len(ok),
+        "selection_note": hindsight_note(len(ok), "combinations"),
     }
 
 
@@ -1119,10 +1123,12 @@ def selection_checks(rows: list[dict], best: dict | None, a: int, b: int, open_e
 
     ``deflated``: the top combination's deflated Sharpe ratio, counting every tested combination as
     a try. ``overfitting``: probability of backtest overfitting, with the period cut into
-    ``stats.PBO_BLOCKS`` equal stretches and combinations compared by profit. ``open_end`` keeps
+    ``stats.PBO_BLOCKS`` equal stretches and combinations compared by profit. ``multiple_testing``:
+    a one-sided test per combination that its average trade made money, counted before and after
+    the Bonferroni and Benjamini-Hochberg corrections for the number tested. ``open_end`` keeps
     trades closed out just after the last candle in the last stretch."""
     ok = [r for r in rows if not r["error"]]
-    out: dict = {"deflated": None, "overfitting": None}
+    out: dict = {"deflated": None, "overfitting": None, "multiple_testing": None}
     if not ok:
         return out
     returns = {}
@@ -1133,6 +1139,12 @@ def selection_checks(rows: list[dict], best: dict | None, a: int, b: int, open_e
         srs = [x for x in (stats.per_trade_sharpe(returns[id(r)]) for r in ok) if x is not None]
         var = float(np.var(srs, ddof=1)) if len(srs) >= 2 else None
         out["deflated"] = stats.deflated_sharpe(returns[id(best)], len(ok), var)
+    chosen = next((i for i, r in enumerate(ok) if r is best), None)
+    mt = stats.multiple_testing([returns[id(r)] for r in ok], chosen)
+    if mt is not None:
+        mt["from"] = pd.Timestamp(a, tz="UTC").isoformat()
+        mt["to"] = pd.Timestamp(b - 1, tz="UTC").isoformat()
+    out["multiple_testing"] = mt
     edges = np.linspace(a, b, stats.PBO_BLOCKS + 1)
     profit = np.zeros((stats.PBO_BLOCKS, len(ok)))
     for j, r in enumerate(ok):
@@ -1145,6 +1157,72 @@ def selection_checks(rows: list[dict], best: dict | None, a: int, b: int, open_e
         pbo["from"] = pd.Timestamp(a, tz="UTC").isoformat()
         pbo["to"] = pd.Timestamp(b - 1, tz="UTC").isoformat()
     out["overfitting"] = pbo
+    return out
+
+
+PLATEAU_SHARE = 0.75  # neighbours' middle score at least this share of the chosen one's: "plateau"
+
+
+SELECTION_BIAS = "results for a setting picked this way tend to look better than they will on new data."
+
+
+def selection_note(n: int) -> str:
+    """Plain words on picking the best of ``n`` tries."""
+    return f"Picked as the best of {n:,} setting{'s' if n != 1 else ''} tried; {SELECTION_BIAS}"
+
+
+def hindsight_note(n: int, what: str) -> str:
+    """The walk-forward checks' version: the hindsight figure is a best-of-``n`` pick, each stretch's isn't."""
+    return (f"The hindsight figure is the best of {n:,} {what} tried; {SELECTION_BIAS} "
+            "Each stretch's pick only used data from before that stretch.")
+
+
+def _numeric(values: list) -> bool:
+    return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values)
+
+
+def neighbours(rows: list[dict], best: dict | None) -> dict | None:
+    """How the score changes around the chosen combination: every combination one step away from
+    it in the grid on one or more number settings (the others held at the chosen value; settings
+    that are a list of options are held too). Purely descriptive numbers, plus ``shape``:
+    "plateau" when the neighbours' middle score is at least ``PLATEAU_SHARE`` of the chosen
+    score, "peak" when lower, None when the chosen score isn't above zero. None without a
+    chosen combination or any number setting with more than one value."""
+    if best is None or best.get("score") is None:
+        return None
+    ok = [r for r in rows if not r["error"]]
+    width = len(best["values"])
+    axes = []
+    for k in range(width):
+        vals = list(dict.fromkeys(r["values"][k] for r in ok))
+        axes.append(sorted(vals) if _numeric(vals) and len(vals) > 1 else None)
+    if not any(axes):
+        return None
+    pos = [ax.index(best["values"][k]) if ax else None for k, ax in enumerate(axes)]
+    near = []
+    for r in ok:
+        if r is best:
+            continue
+        close = True
+        for k, ax in enumerate(axes):
+            v = r["values"][k]
+            if ax is None:
+                close = close and v == best["values"][k]
+            else:
+                close = close and abs(ax.index(v) - pos[k]) <= 1
+        if close:
+            near.append(r)
+    scores = [float(r["score"]) for r in near if r.get("score") is not None]
+    chosen = float(best["score"])
+    out = {"score": chosen, "neighbours": len(near), "scored": len(scores),
+           "settings": [k for k, ax in enumerate(axes) if ax], "low": None, "high": None, "median": None,
+           "share": None, "below": None, "shape": None}
+    if scores:
+        mid = float(np.median(scores))
+        out.update(low=min(scores), high=max(scores), median=mid, below=sum(x < chosen for x in scores))
+        if chosen > 0:
+            out["share"] = mid / chosen
+            out["shape"] = "plateau" if mid >= PLATEAU_SHARE * chosen else "peak"
     return out
 
 
@@ -1219,6 +1297,7 @@ def optimise(progress, variants: list[tuple[tuple, dict | str]], df: pd.DataFram
     ranked = sorted((r for r in rows if r["score"] is not None), key=lambda r: (r["enough_trades"], r["score"]), reverse=True)
     best = ranked[0] if ranked else None
     selection = selection_checks(rows, best, a, cut, open_end=not holdout_pct)
+    stability = neighbours(rows, best)
     for r in rows:
         r.pop("_trades", None)
     return {
@@ -1229,6 +1308,8 @@ def optimise(progress, variants: list[tuple[tuple, dict | str]], df: pd.DataFram
         "holdout": holdout,
         "walk_forward": wf,
         **selection,
+        "stability": stability,
+        "selection_note": selection_note(sum(1 for r in rows if not r["error"])) if best else None,
         "tested": sum(1 for r in rows if not r["error"]),
         "failed": sum(1 for r in rows if r["error"]),
         "seconds": round(time.time() - t0, 1),

@@ -129,6 +129,17 @@ export function analysisPanel({ getData, render, intro, settings, apply, runLabe
     return d || null;
   }
 
+  // --- robustness summary: the latest result of each tool, gathered in one place
+  const last = { backtest: null, luck: null, optimise: null };
+  const summary = h("section", { class: "section robust-summary", hidden: true });
+  function remember(kind, value) {
+    last[kind] = value;
+    const node = robustnessSummary(last);
+    clear(summary);
+    summary.hidden = !node;
+    if (node) summary.appendChild(node);
+  }
+
   // --- backtest
   const btOut = h("div", {}, h("p", { class: "muted small" }, intro));
   const btRun = h("button", { class: "primary", type: "button" }, runLabel);
@@ -143,6 +154,7 @@ export function analysisPanel({ getData, render, intro, settings, apply, runLabe
       const res = await POST("/backtest", body);
       savePref("ta-did-backtest", "1");
       clear(btOut).appendChild(render(res));
+      remember("backtest", res);
       btRun.textContent = "Test again";
       if (onRan) onRan("backtest");
     } catch (e) { clear(btOut).appendChild(h("p", { class: "error-box" }, e.message)); }
@@ -215,7 +227,7 @@ export function analysisPanel({ getData, render, intro, settings, apply, runLabe
     h("div", { class: "tool-actions" }, swRun), swOut);
 
   // --- optimiser
-  const opt = optimiserPane({ fetchData, settings, apply, period, strategyId, onRan });
+  const opt = optimiserPane({ fetchData, settings, apply, period, strategyId, onRan, onResult: (res, axes) => remember("optimise", { res, axes }) });
 
   // --- luck check
   const lkOut = h("div");
@@ -227,7 +239,9 @@ export function analysisPanel({ getData, render, intro, settings, apply, runLabe
     lkRun.disabled = true;
     clear(lkOut).appendChild(h("p", { class: "loading" }, "Backtesting on up to 200 random price paths and reshuffling the trades. This takes up to a minute…"));
     try {
-      clear(lkOut).appendChild(renderLuck(await POST("/luck", { data, trials, strategy_id: strategyId, ...period.value() })));
+      const res = await POST("/luck", { data, trials, strategy_id: strategyId, ...period.value() });
+      clear(lkOut).appendChild(renderLuck(res));
+      remember("luck", res);
       lkRun.textContent = "Check again";
       if (onRan) onRan("luck");
     } catch (e) { clear(lkOut).appendChild(h("p", { class: "error-box" }, e.message)); }
@@ -256,13 +270,15 @@ export function analysisPanel({ getData, render, intro, settings, apply, runLabe
   }
   show(current);
   const panel = h("div", { class: "panel tools" },
-    h("section", { class: "section tool-top" }, seg, h("div", { class: "bt-controls" }, period)), holder);
+    h("section", { class: "section tool-top" }, seg, h("div", { class: "bt-controls" }, period)), holder, summary);
   panel.markStale = () => {
     for (const out of [btOut, swOut, opt.out, lkOut]) {
       if (out.querySelector(".plain-results, .headline, .sweep, .optimiser, .luck") && !out.querySelector(".stale")) {
         out.insertBefore(h("p", { class: "notice stale" }, "You've changed the settings. Run it again to update these results."), out.firstChild);
       }
     }
+    if (!summary.hidden && !summary.querySelector(".stale"))
+      summary.insertBefore(h("p", { class: "notice stale" }, "You've changed the settings since these results were made. Run the tools again to update them."), summary.firstChild);
   };
   panel.show = show; // open one of the tools from elsewhere on the page (the stage strip's "Go there")
   return panel;
@@ -276,7 +292,7 @@ const HOLDOUT_OPTIONS = [[0, "Nothing: rank on the whole period"], [20, "The las
 const FOLD_OPTIONS = [[0, "Off"], [3, "3 stretches"], [4, "4 stretches"], [5, "5 stretches"], [6, "6 stretches"]];
 function comboCap() { return typeof isHosted === "function" && isHosted() ? 200 : 2000; }
 
-function optimiserPane({ fetchData, settings, apply, period, strategyId = null, onRan = null }) {
+function optimiserPane({ fetchData, settings, apply, period, strategyId = null, onRan = null, onResult = null }) {
   let list = [];
   let axes = [newAxis()];
   let score = pref("ta-opt-score", "return");
@@ -373,7 +389,10 @@ function optimiserPane({ fetchData, settings, apply, period, strategyId = null, 
       try { st = await GET(`/jobs/${encodeURIComponent(id)}`); } catch (e) { finish(); clear(out).appendChild(h("p", { class: "error-box" }, e.message)); return; }
       if (st.status === "queued" || st.status === "running") { showProgress(st); await new Promise((r) => setTimeout(r, 700)); continue; }
       finish();
-      if (st.status === "completed") clear(out).appendChild(renderOptimiser(st.result, chosenAxes, apply ? applyRow : null));
+      if (st.status === "completed") {
+        clear(out).appendChild(renderOptimiser(st.result, chosenAxes, apply ? applyRow : null));
+        if (onResult) onResult(st.result, chosenAxes);
+      }
       else if (st.status === "cancelled") clear(out).appendChild(h("p", { class: "notice" }, `Stopped after ${st.done.toLocaleString()} of ${st.total.toLocaleString()} combinations.`));
       else clear(out).appendChild(h("p", { class: "error-box" }, st.error || "The optimiser run failed."));
       return;
@@ -427,6 +446,95 @@ function optimiserPane({ fetchData, settings, apply, period, strategyId = null, 
   return { pane, out, refresh };
 }
 
+const has = (v) => v !== null && v !== undefined;
+
+/** Robustness summary: results by calendar year and market state, sample-size ranges, the spread of the worst drop,
+    earlier vs kept-back results and parameter sensitivity, from the latest backtest, luck check and optimiser run.
+    Only the parts whose tool has run are shown. Descriptive only. */
+export function robustnessSummary({ backtest: bt, luck, optimise: op }) {
+  const m = bt && bt.metrics ? bt.metrics : null;
+  const sym = (bt || luck || {}).currency || "";
+  const tone = (v) => (v > 0 ? "gain" : v < 0 ? "loss" : "");
+  const parts = [];
+  const part = (title, tip, ...kids) => parts.push(h("div", { class: "walk" }, h("h3", {}, title, tip ? infoTip(tip) : null), ...kids));
+
+  if (m && m.by_year && m.by_year.length) part("By calendar year",
+    "Change in the balance over each calendar year (UTC) of the backtest, the deepest drop within that year, and the trades that closed in it. The first and last years can be part-years.",
+    h("div", { class: "table-wrap" }, h("table", { class: "trades sweep-table" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Year"), ["Balance change", "Worst drop", "Trades closed", "Won", "Profit / loss", "Average trade"].map((x) => h("th", { class: "num" }, x)))),
+      h("tbody", {}, m.by_year.map((y) => h("tr", {}, h("th", { scope: "row" }, String(y.year)),
+        h("td", { class: "num " + tone(y.change_pct) }, signed(y.change_pct, "%", 1)),
+        h("td", { class: "num" }, has(y.max_drawdown_pct) ? num(y.max_drawdown_pct, 1) + "%" : "–"),
+        h("td", { class: "num" }, String(y.trades)),
+        h("td", { class: "num" }, has(y.won_pct) ? num(y.won_pct, 0) + "%" : "–"),
+        h("td", { class: "num " + tone(y.pnl) }, y.trades ? money(y.pnl, sym) : "–"),
+        h("td", { class: "num" }, has(y.avg_r) ? signed(y.avg_r, "R") : "–")))))));
+
+  const reg = (bt && bt.regimes) || (luck && luck.regimes);
+  if (reg) parts.push(renderRegimes(reg, sym));
+
+  if (m && m.trades) {
+    const rr = m.ratio_ranges || {};
+    const band = (b) => `${num(b[0])} to ${num(b[1])}`;
+    const lines = [["Trades", String(m.trades)]];
+    if (m.win_rate_range) lines.push(["Won", `${num(m.win_rate_pct, 0)}%; 95% range ${num(m.win_rate_range[0], 0)}% to ${num(m.win_rate_range[1], 0)}% (Wilson)`]);
+    if (has(m.sharpe)) lines.push(["Sharpe (yearly)", num(m.sharpe) + (m.sharpe_ci ? `; 95% range ${band(m.sharpe_ci)} taking trades as independent` : "") +
+      (rr.sharpe ? `; ${band(rr.sharpe)} allowing for linked returns` : "")]);
+    if (has(m.sortino)) lines.push(["Sortino (yearly)", num(m.sortino) + (rr.sortino ? `; 95% range ${band(rr.sortino)} allowing for linked returns` : "")]);
+    if (luck && luck.deflated) lines.push(["Deflated Sharpe (luck check)", `${pctOf(luck.deflated.probability)} chance the true per-trade Sharpe ratio is above the luck bar, counting ${luck.deflated.trials} ${luck.deflated.trials === 1 ? "try" : "tries"}`]);
+    part("Sample size", "Each range shows how far the figure could move with a different run of trades like these. Fewer trades give wider ranges. " +
+      "The linked-returns ranges resample runs of candles in a row, so a trade's candles and overlapping trades stay together.",
+      m.sample_warning ? h("p", { class: "sample-warning", role: "note" }, m.sample_warning) : null,
+      h("dl", { class: "metrics" }, lines.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+      m.overlapping_trades ? h("p", { class: "small muted" }, `${m.overlapping_trades} trade${m.overlapping_trades === 1 ? "" : "s"} opened while another was still open, so their results are linked.`) : null);
+  }
+
+  const mc = bt && bt.monte_carlo;
+  const lo = luck && luck.order;
+  const spread = mc ? { runs: mc.runs, actual: mc.actual_dd, mid: mc.p50, bad: mc.p5, good: mc.p95 }
+    : lo ? { runs: lo.runs, actual: lo.actual_dd, mid: lo.median_dd, bad: lo.bad_dd, good: lo.good_dd } : null;
+  if (spread) part("Worst drop, same trades in other orders", "The trades shuffled into random orders. How deep the worst drop gets depends on which trades happen to come together.",
+    h("p", {}, `In this backtest's order the worst drop was ${num(Math.abs(spread.actual), 1)}%. Across ${spread.runs.toLocaleString("en-GB")} reshuffled orders it was typically `,
+      h("strong", {}, `${num(Math.abs(spread.mid), 1)}%`), `; 1 order in 20 reached ${num(Math.abs(spread.bad), 1)}% or deeper, and 1 in 20 stayed under ${num(Math.abs(spread.good), 1)}%.`));
+
+  const cmp = [];
+  if (m && bt.oos_metrics) {
+    const o = bt.oos_metrics;
+    cmp.push(["Backtest train / test split", `${signed(m.total_return_pct, "%")} over ${m.trades} trades`, `${signed(o.total_return_pct, "%")} over ${o.trades} trades (fresh balance)`]);
+  }
+  const ho = op && op.res.holdout;
+  if (ho && ho.best) cmp.push(["Optimiser winner, kept-back part", `${signed(ho.best.train_return_pct, "%")} on the ranked part`, `${signed(ho.best.holdout_return_pct, "%")} over ${ho.best.holdout_trades} trades`]);
+  const wf = op && op.res.walk_forward;
+  if (wf && !wf.skipped) cmp.push(["Optimiser, walk-forward", `${signed(wf.hindsight_pct, "%")} for the best combination picked with hindsight`, `${signed(wf.walk_forward_pct, "%")} re-picking from earlier data before each stretch`]);
+  if (cmp.length) part("Earlier results vs kept-back results", "The kept-back part was not used to choose or tune anything, so it is the closest a backtest gets to prices the rules haven't seen.",
+    h("div", { class: "table-wrap" }, h("table", { class: "trades sweep-table" },
+      h("thead", {}, h("tr", {}, h("th", {}, ""), h("th", {}, "Part looked at"), h("th", {}, "Part kept back"))),
+      h("tbody", {}, cmp.map(([k, a, b]) => h("tr", {}, h("th", { scope: "row" }, k), h("td", {}, a), h("td", {}, b)))))));
+
+  if (op && op.res.best) {
+    const r = op.res;
+    const label = (vals) => op.axes.map((a, i) => `${a.label} ${optionLabel(a, vals[i])}`).join(", ");
+    const fmtScore = (v) => (r.score === "return" ? signed(v, "%") : num(v, 2));
+    part("Parameter sensitivity, last optimiser run", null,
+      h("p", {}, "Chosen combination: ", h("strong", {}, label(r.best)), `, from ${day(r.start)} to ${day(r.end)}.`),
+      r.selection_note ? h("p", { class: "small muted" }, r.selection_note) : null,
+      r.overfitting ? h("p", { class: "small" }, `Probability of backtest overfitting: ${pctOf(r.overfitting.probability)}.`) : null);
+    if (r.stability) parts.push(renderStability(r.stability, fmtScore));
+    if (r.multiple_testing) parts.push(renderMultipleTesting(r.multiple_testing));
+  }
+
+  if (luck && luck.total) part("Luck check", null, h("p", {}, `${luck.passed} of ${luck.total} checks passed: ` +
+    luck.checks.map((c) => `${c.title} (${c.passed === null ? "not run" : c.passed ? "passed" : "not passed"})`).join("; ") + "."));
+
+  if (!parts.length) return null;
+  const from = [m ? `backtest ${day(m.start)} to ${day(m.end)}` : null, luck ? `luck check ${day(luck.start)} to ${day(luck.end)}` : null,
+    op ? `optimiser ${day(op.res.start)} to ${day(op.res.end)}` : null].filter(Boolean);
+  return h("div", {}, h("h2", {}, "Robustness summary"), stageTag("robust"),
+    h("p", { class: "small muted" }, `Gathered from the latest results on this page (${from.join("; ")}). A part appears once the tool it comes from has run. ` +
+      "All of it describes past prices; none of it predicts future results."),
+    ...parts);
+}
+
 function renderOptimiser(res, axes, onApply) {
   const box = h("div", { class: "optimiser" });
   const rows = res.rows;
@@ -449,13 +557,16 @@ function renderOptimiser(res, axes, onApply) {
     h("p", { class: "result-lede" }, `From ${day(res.start)} to ${day(res.end)}, ${res.tested.toLocaleString()} combinations were tested in ${res.seconds}s. The best ${scoreName.toLowerCase()}`,
       ho ? ` on the first ${100 - ho.pct}% of the period` : "", " came from ",
       h("strong", {}, label(best.values)), ` (${fmtScore(best.score)}, ${signed(part.return_pct, "%")} over ${part.trades} trades).`),
+    res.selection_note ? h("p", { class: "small muted" }, res.selection_note) : null,
     enough < scored.length ? h("p", { class: "muted small" }, `${scored.length - enough} of ${scored.length} combinations made fewer than ${res.min_trades} trades${ho ? " in the ranking part" : ""} and are ranked below the rest: too few trades to trust.`) : null,
     axes.length >= 2 ? heatmap(rows, axes, res, fmtScore) : null,
-    ho || res.walk_forward || res.overfitting || res.deflated ? stageTag("robust") : null,
+    ho || res.walk_forward || res.overfitting || res.deflated || res.multiple_testing || res.stability ? stageTag("robust") : null,
     ho ? renderHoldout(ho, best, label) : null,
     res.walk_forward ? renderWalkForwardGrid(res.walk_forward, label) : null,
     res.overfitting ? renderOverfitting(res.overfitting) : null,
     res.deflated ? renderDeflated(res.deflated, "the top combination") : null,
+    res.multiple_testing ? renderMultipleTesting(res.multiple_testing) : null,
+    res.stability ? renderStability(res.stability, fmtScore) : null,
   ]);
   const shown = ranked.slice(0, 40);
   const table = h("table", { class: "trades sweep-table" },
@@ -519,6 +630,44 @@ function renderOverfitting(o) {
       h("strong", {}, pctOf(o.probability)), `. In ${o.lost} of them it lost money on the other ${half}.`));
 }
 
+const pText = (p) => (p === null || p === undefined ? "–" : p < 0.001 ? "below 0.001" : num(p, 3));
+
+/** How many combinations clear a 5% test that their average trade made money, before and after allowing for how many were tried. */
+function renderMultipleTesting(mt) {
+  const lvl = `${num(mt.alpha * 100, 0)}%`;
+  const c = mt.chosen;
+  const chosen = c && c.p !== null && c.p !== undefined
+    ? ` For the chosen combination (${c.trades} trades) the p-value is ${pText(c.p)}: ${pText(c.bonferroni)} after the Bonferroni correction and ${pText(c.bh)} after the Benjamini–Hochberg correction.`
+    : c ? " The chosen combination had too few trades, or trades with identical results, to test." : "";
+  const untested = mt.untestable ? ` ${mt.untestable} combination${mt.untestable === 1 ? "" : "s"} had too few trades or identical results to test and count as not clearing it.` : "";
+  return h("div", { class: "walk" }, h("h3", {}, "Allowing for the number of combinations tried", infoTip(
+      "Each combination gets a one-sided t-test of whether its average trade return was above zero, using the trades in the ranked part of the period. " +
+      "When many combinations are tested, some clear the bar by chance. The Bonferroni correction multiplies each p-value by the number of tests (strict); " +
+      "the Benjamini–Hochberg correction (1995) limits the expected share of chance finds among those that clear it. The t-test treats trades as independent, so it is an approximation.")),
+    h("p", {}, `From ${day(mt.from)} to ${day(mt.to)}, of ${mt.tests.toLocaleString("en-GB")} combinations, `,
+      h("strong", {}, String(mt.raw)), ` cleared the ${lvl} level on their own, `, h("strong", {}, String(mt.bonferroni)), " after the Bonferroni correction and ",
+      h("strong", {}, String(mt.bh)), ` after the Benjamini–Hochberg correction.${chosen}${untested}`));
+}
+
+/** How the score changes across the chosen combination's neighbours in the grid. */
+function renderStability(st, fmtScore) {
+  const tip = infoTip("Neighbours are the combinations one step away from the chosen one in the grid on any of the number settings, with option settings held the same. " +
+    "A plateau here means the neighbours' middle score is at least 75% of the chosen one's; a peak means it is lower. Neither says how a setting will do on new data.");
+  const head = h("h3", {}, "Neighbouring settings", tip);
+  if (!st.neighbours) return h("div", { class: "walk" }, head, h("p", { class: "small muted" }, "No neighbouring combinations were tested next to the chosen one."));
+  if (!st.scored) return h("div", { class: "walk" }, head, h("p", { class: "small muted" }, `None of its ${st.neighbours} neighbouring combinations could be scored (no trades).`));
+  let shape = "";
+  if (st.shape) {
+    const share = st.share >= 0 ? `${num(st.share * 100, 0)}% of the chosen one's` : "below zero";
+    shape = st.shape === "plateau"
+      ? ` Their middle score is ${share}: the scores are fairly level around the chosen setting (a plateau).`
+      : ` Their middle score is ${share}: the chosen setting stands above its neighbours (a peak).`;
+  }
+  return h("div", { class: "walk" }, head,
+    h("p", {}, `The ${st.scored} neighbouring combination${st.scored === 1 ? "" : "s"} scored from ${fmtScore(st.low)} to ${fmtScore(st.high)} (middle value `,
+      h("strong", {}, fmtScore(st.median)), `), against ${fmtScore(st.score)} for the chosen one; ${st.below} of them scored lower.${shape}`));
+}
+
 /** Walk-forward over the whole grid: the combination picked before each stretch and how it did. */
 function renderWalkForwardGrid(wf, label) {
   const tip = infoTip("Splits the period into stretches. Before each stretch it picks the combination that scored best on all the data so far, then records how it did on the stretch. Every choice only uses the past, like tuning for real would.");
@@ -531,6 +680,7 @@ function renderWalkForwardGrid(wf, label) {
     h("p", {}, `From ${day(wf.from)} to ${day(wf.to)}, re-picking the best combination before each of ${wf.folds} stretches would have made `,
       h("strong", { class: wf.walk_forward_pct >= 0 ? "gain" : "loss" }, signed(wf.walk_forward_pct, "%")),
       `. Picking the single best combination with hindsight (${label(wf.hindsight_values)}) made ${signed(wf.hindsight_pct, "%")}; the average combination made ${signed(wf.average_pct, "%")}. ${verdict}`),
+    wf.selection_note ? h("p", { class: "small muted" }, wf.selection_note) : null,
     h("div", { class: "table-wrap" }, h("table", { class: "trades sweep-table" },
       h("thead", {}, h("tr", {}, h("th", {}, "Stretch"), h("th", {}, "Picked using data up to"), h("th", {}, "Combination"), h("th", { class: "num" }, "Result on the stretch"), h("th", { class: "num" }, "Trades"))),
       h("tbody", {}, wf.windows.map((w, i) => h("tr", {}, h("td", {}, String(i + 1)), h("td", {}, day(w.train_to)),
@@ -630,6 +780,7 @@ function renderWalkForward(wf, setting) {
       h("strong", { class: wf.walk_forward_pct >= 0 ? "gain" : "loss" }, signed(wf.walk_forward_pct, "%")),
       `. With hindsight, the best single value (${optionLabel(setting, wf.hindsight_value)}) made ${signed(wf.hindsight_pct, "%")}; the average of all values ${signed(wf.average_pct, "%")}.`),
     h("p", { class: "small muted" }, verdict),
+    wf.selection_note ? h("p", { class: "small muted" }, wf.selection_note) : null,
     h("div", { class: "table-wrap" }, h("table", { class: "trades" },
       h("thead", {}, h("tr", {}, h("th", {}, "Tuned on data up to"), h("th", {}, "Picked"), h("th", { class: "num" }, "Result then"),
         h("th", {}, "Next stretch, to"), h("th", { class: "num" }, "Result"))),
@@ -822,6 +973,8 @@ export function renderBacktest(res) {
     ["Candles held on average", `${num(m.avg_bars_held, 1)} (${hours(m.avg_hold_hours)})`],
     ["Sharpe (yearly)", num(m.sharpe) + (m.sharpe_ci ? ` (95% CI, approx. assuming independent trades: ${num(m.sharpe_ci[0])} to ${num(m.sharpe_ci[1])})` : "")],
     ["Sortino (yearly)", num(m.sortino)],
+    ...(m.ratio_ranges ? [["Sharpe and Sortino, 95% range for linked returns", linkedText(m.ratio_ranges)]] : []),
+    ...(m.win_rate_range ? [["Share of trades won, 95% range", `${num(m.win_rate_range[0], 0)}% to ${num(m.win_rate_range[1], 0)}% (Wilson range from ${m.trades} trades)`]] : []),
     ["Longest time below a previous high", `${num(m.longest_underwater_days, 1)} days`],
     ["Yearly growth rate (CAGR)", m.cagr_pct === null || m.cagr_pct === undefined ? "Needs a test of a year or more" : signed(m.cagr_pct, "%")],
     ["Calmar (yearly growth ÷ worst drawdown)", num(m.calmar)],
@@ -917,6 +1070,15 @@ function hours(hrs) {
   if (hrs === null || hrs === undefined) return "–";
   if (hrs < 48) return `${num(hrs, 1)} h`;
   return `${num(hrs / 24, 1)} days`;
+}
+
+/** Sharpe and Sortino ranges from the block bootstrap, which keeps linked returns together. */
+function linkedText(rr) {
+  const band = (b) => (b ? `${num(b[0])} to ${num(b[1])}` : "–");
+  const overlap = rr.overlapping_trades
+    ? ` ${rr.overlapping_trades} trade${rr.overlapping_trades === 1 ? "" : "s"} opened while another was still open, so their results are linked.` : "";
+  return `Sharpe ${band(rr.sharpe)}, Sortino ${band(rr.sortino)}. Resampled ${rr.runs.toLocaleString("en-GB")} times in runs of ${rr.block} candles in a row, ` +
+    `so the candles of one trade, and trades that overlap, stay together instead of being treated as independent.${overlap}`;
 }
 
 /** Trades reshuffled into other orders: how deep the worst drop could have been with the same trades. */

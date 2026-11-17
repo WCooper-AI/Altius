@@ -9,6 +9,11 @@
 * ``overfitting``: probability of backtest overfitting by combinatorially symmetric
   cross-validation (Bailey, Borwein, López de Prado & Zhu, 2015).
 * ``regimes``: how the trades did when the market was rising or falling, calm or busy.
+* ``multiple_testing``: how many of the optimiser's combinations clear a one-sided test that
+  the average trade made money, before and after allowing for the number tried (Bonferroni;
+  Benjamini & Hochberg, 1995).
+* ``ratio_ranges``: Sharpe and Sortino ranges from a block bootstrap of candle-to-candle balance
+  changes, so returns that are linked (overlapping trades, one trade over many candles) stay together.
 
 All of these describe the past; none predicts future results.
 """
@@ -25,6 +30,8 @@ import pandas as pd
 Z95 = 1.959963984540054
 EULER = 0.5772156649015329
 MIN_TRADES_DSR = 10
+ALPHA = 0.05  # the usual 5% level for the optimiser's per-combination tests
+RATIO_RUNS = 1000  # bootstrap samples behind the linked-returns Sharpe and Sortino ranges
 PBO_BLOCKS = 8
 TREND_DAYS = 50  # rising = the daily close is above its average over this many days
 VOL_DAYS = 20  # busy = daily moves over this many days were larger than the period's usual
@@ -204,3 +211,148 @@ def regimes(df: pd.DataFrame, trades: pd.DataFrame, start: pd.Timestamp | None =
             })
     unknown = int(tagged["direction"].isna().sum()) if len(trades) else 0
     return {"trend_days": TREND_DAYS, "vol_days": VOL_DAYS, "rows": rows, "unknown": unknown}
+
+
+# ------------------------------------------------------------------ multiple testing
+
+
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued fraction for the regularised incomplete beta function (modified Lentz)."""
+    tiny, qab, qap, qam = 1e-300, a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    d = 1.0 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 300):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = 1.0 + aa / c if abs(1.0 + aa / c) > tiny else tiny
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > tiny else tiny)
+        c = 1.0 + aa / c if abs(1.0 + aa / c) > tiny else tiny
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-14:
+            break
+    return h
+
+
+def betainc(a: float, b: float, x: float) -> float:
+    """Regularised incomplete beta function I_x(a, b)."""
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+    front = math.exp(math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x))
+    if x < (a + 1) / (a + b + 2):
+        return front * _betacf(a, b, x) / a
+    return 1.0 - front * _betacf(b, a, 1 - x) / b
+
+
+def t_upper(t: float, df: float) -> float:
+    """Chance a Student's t with ``df`` degrees of freedom is above ``t`` (one-sided p-value)."""
+    if not math.isfinite(t):
+        return 0.0 if t > 0 else 1.0
+    tail = 0.5 * betainc(df / 2, 0.5, df / (df + t * t))
+    return tail if t > 0 else 1.0 - tail
+
+
+def mean_above_zero_p(r: np.ndarray) -> float | None:
+    """One-sided p-value of a t-test that the average of ``r`` is above zero. None with fewer than
+    2 values or no variation."""
+    r = np.asarray(r, dtype=float)
+    r = r[np.isfinite(r)]
+    if len(r) < 2:
+        return None
+    sd = float(np.std(r, ddof=1))
+    if not sd > 0:
+        return None
+    return t_upper(float(np.mean(r)) / (sd / math.sqrt(len(r))), len(r) - 1)
+
+
+def bonferroni(p: np.ndarray) -> np.ndarray:
+    """Bonferroni-adjusted p-values: each multiplied by the number of tests, at most 1."""
+    p = np.asarray(p, dtype=float)
+    return np.minimum(1.0, p * len(p))
+
+
+def benjamini_hochberg(p: np.ndarray) -> np.ndarray:
+    """Benjamini-Hochberg adjusted p-values (false discovery rate), in the order given."""
+    p = np.asarray(p, dtype=float)
+    m = len(p)
+    if not m:
+        return p
+    order = np.argsort(p)
+    scaled = p[order] * m / np.arange(1, m + 1)
+    adj = np.minimum.accumulate(scaled[::-1])[::-1]
+    out = np.empty(m)
+    out[order] = np.minimum(1.0, adj)
+    return out
+
+
+def multiple_testing(returns: list[np.ndarray], chosen: int | None, alpha: float = ALPHA) -> dict | None:
+    """One-sided t-test per combination that its average trade return is above zero, then how
+    many clear ``alpha`` before and after allowing for the number of combinations tested.
+
+    Combinations with too few trades (or identical results) to test count as tried with
+    p-value 1. ``chosen`` is the index of the combination the optimiser picked. None with no
+    combinations."""
+    m = len(returns)
+    if not m:
+        return None
+    raw = [mean_above_zero_p(r) for r in returns]
+    p = np.array([1.0 if x is None else x for x in raw])
+    bon, bh = bonferroni(p), benjamini_hochberg(p)
+    out = {"tests": m, "alpha": alpha, "untestable": sum(x is None for x in raw),
+           "raw": int((p < alpha).sum()), "bonferroni": int((bon < alpha).sum()), "bh": int((bh < alpha).sum()),
+           "chosen": None}
+    if chosen is not None and 0 <= chosen < m:
+        out["chosen"] = {"p": raw[chosen], "bonferroni": float(bon[chosen]) if raw[chosen] is not None else None,
+                         "bh": float(bh[chosen]) if raw[chosen] is not None else None,
+                         "trades": int(np.isfinite(np.asarray(returns[chosen], dtype=float)).sum())}
+    return out
+
+
+# ------------------------------------------------------------------ linked returns
+
+
+def ratio_ranges(r: np.ndarray, scale: float, block: int | None = None, runs: int = RATIO_RUNS,
+                 rng: np.random.Generator | None = None) -> dict | None:
+    """95% ranges for the Sharpe and Sortino ratios of per-candle returns ``r`` (scaled by
+    ``scale``, the square root of candles a year) from a circular block bootstrap: each sample
+    is built from runs of ``block`` consecutive candles, so linked returns stay together.
+
+    Uses running sums, so each sample costs one lookup per block rather than per candle.
+    None with fewer than 30 returns or no variation."""
+    r = np.asarray(r, dtype=float)
+    r = r[np.isfinite(r)]
+    n = len(r)
+    if n < 30 or not float(np.std(r)) > 0:
+        return None
+    b = int(min(max(1, block or block_size(n)), max(1, n // 2)))
+    rng = rng or np.random.default_rng(0)
+    ext = np.concatenate([r, r[:b]])
+    down = np.minimum(ext, 0.0)
+    sums = [np.concatenate(([0.0], np.cumsum(v))) for v in (ext, ext * ext, down * down)]
+    full, rest = divmod(n, b)
+    starts = rng.integers(0, n, (runs, full))
+    tot = [c[starts + b].sum(axis=1) - c[starts].sum(axis=1) for c in sums]
+    if rest:
+        s = rng.integers(0, n, runs)
+        tot = [t + c[s + rest] - c[s] for t, c in zip(tot, sums)]
+    s1, s2, s3 = tot
+    mean = s1 / n
+    var = np.maximum(s2 - n * mean * mean, 0.0) / (n - 1)
+    sd, dsd = np.sqrt(var), np.sqrt(s3 / n)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sharpe = mean / sd * scale
+        sortino = mean / dsd * scale
+
+    def band(x):
+        x = x[np.isfinite(x)]
+        return [float(v) for v in np.percentile(x, [2.5, 97.5])] if len(x) >= runs // 2 else None
+
+    return {"sharpe": band(sharpe), "sortino": band(sortino), "block": b, "runs": runs, "candles": n}
