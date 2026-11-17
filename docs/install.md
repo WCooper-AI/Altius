@@ -42,8 +42,9 @@ Full details, including the service and the Docker files: [selfhost/README.md](.
 `./setup.sh --docker` (or `docker compose up -d --build` after copying `.env.example` to
 `.env` and setting `TRADEALERTS_PASSWORD`) runs it in one container with everything in
 `./workspace`. The port is published on `127.0.0.1` only: put a reverse proxy with HTTPS in
-front of it. See [Security](security.md) for what the password protects and what the server
-refuses to do without one.
+front of it. [Running on a server](self-hosting.md) has Caddy and nginx examples, firewall
+rules and a sign-in checklist; [Security](security.md) covers what the password protects and
+what the server refuses to do without one.
 
 ## For developers
 

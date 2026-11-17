@@ -20,9 +20,13 @@ behalf.
 - To listen on any other address it needs `TRADEALERTS_PASSWORD`, and refuses to start without
   one unless you pass `--no-auth`, which is only for when a reverse proxy already handles
   sign-in. The Docker setup sets a password for you.
+- Behind a reverse proxy, always set a password. A copy without one refuses requests that
+  arrive through a proxy (they carry `X-Forwarded-For`, `X-Real-IP` or `Forwarded`), unless
+  `--no-auth` says the proxy signs people in. See [Running on a server](self-hosting.md).
 - A session is a signed cookie (HttpOnly, SameSite=Strict). Changing the password signs
   everyone out. Repeated wrong passwords are slowed down, and the count is kept in the
-  database so a restart does not reset it.
+  database so a restart does not reset it. Each attempt is counted before the password is
+  checked, so sending many guesses at once gets no more through than sending them one by one.
 - Requests from a browser must carry `X-Requested-With: tradealerts` for anything other than
   reading, which stops another site from using your session; the server also checks the `Host`
   header against the addresses it was started for.
@@ -31,7 +35,7 @@ behalf.
   inline scripts or styles), and `Cache-Control: no-store` on the API.
 
 Put a reverse proxy with HTTPS in front of a server install; the container publishes its port
-on `127.0.0.1` only.
+on `127.0.0.1` only. [Running on a server](self-hosting.md) has the Caddy and nginx settings.
 
 ## Secrets
 
@@ -41,7 +45,10 @@ can send to your channels or read your ntfy topic.
 - The desktop app, and a server install with the `keychain` extra, keep them in the
   computer's password store (Windows Credential Manager, macOS Keychain, Linux Secret Service)
   and leave only a `keychain:<name>` reference in `config.yaml`. `tradealerts serve
-  --no-keychain` keeps them in the file instead; so does a store that cannot be used.
+  --no-keychain` keeps them in the file instead; so does a store that cannot be used, or a
+  "store" that is really a file (the `keyrings.alt` package).
+- `config.yaml`, the sign-in secret and the safety copies made before a restore are written
+  readable only by the account that runs Altius.
 - `config.yaml` can read any value from an environment variable (`${NAME}`), which keeps
   secrets out of the file on a server.
 - Settings never sends a saved password or token back to the browser.
@@ -68,7 +75,11 @@ topic, or self-host ntfy with an access token.
 - Customer settings load untrusted: no environment-variable expansion and no folder
   overrides.
 - Alert webhooks and SMTP servers may only point at public internet addresses, so a customer
-  cannot make the server call its own network.
+  cannot make the server call its own network. The address is looked up once and the
+  connection goes to the address that was checked; IPv6 forms that carry a private IPv4
+  address inside them, and internal names such as cloud metadata services, are refused too.
+  Redirects are not followed (a redirected alert would have lost its message anyway).
+  The self-hosted edition may send alerts to your own network on purpose.
 - A lapsed subscription makes the account read-only: everything can be viewed and
   downloaded; forward tests, alerts and new backtests pause.
 

@@ -12,6 +12,7 @@ The work goes through five stages, and the app shows where each strategy is:
 | Section | What it covers |
 |---|---|
 | [Installation](install.md) | Self-hosted setup (browser, background service, desktop app, Docker), developer install, extras, the hosted edition |
+| [Running on a server](self-hosting.md) | HTTPS with Caddy or nginx, firewall, sign-in hardening checklist, secrets and backups on a VPS |
 | [User guide](user-guide.md) | The pages of the app, the five stages, alerts, sample data, backups |
 | [Strategy development](strategies.md) | Guided setup, the rule builder, markets and instruments, versions, sharing, testing strategies together |
 | [YAML reference](yaml-reference.md) | Every key in a strategy file and in `config.yaml` |
