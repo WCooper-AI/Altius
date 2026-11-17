@@ -1253,6 +1253,7 @@ function testStamp(meta, sym, quality) {
   const issues = (quality && quality.issues) || [];
   const rows = [
     ["Rules", h("span", {}, rules, " ", h("span", { class: "muted" }, `(fingerprint ${meta.rules_hash})`))],
+    ...manifestRows(meta),
     ["Market", `${meta.market} (${meta.symbol})`],
     ["Price data", meta.prices ? `${meta.source}. ${meta.prices}` : meta.source],
     ["Candle size", meta.timeframe],
@@ -1276,7 +1277,44 @@ function testStamp(meta, sym, quality) {
     ["Tested", `${when(meta.tested_at)}, Altius ${meta.engine_version}`],
   ];
   return h("details", { class: "chart stamp" }, h("summary", {}, "How this was tested"),
-    h("dl", { class: "metrics" }, rows.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])));
+    h("dl", { class: "metrics" }, rows.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+    h("div", { class: "actions" }, h("button", { type: "button", class: "quiet", onclick: () => downloadRecord(meta) }, "Download run record"),
+      h("span", { class: "small muted" }, " Everything above as a JSON file, including the rules, to keep or run again later.")));
+}
+
+/** Run-record rows from the reproducibility fields: strategy, indicator code versions, period asked, time zones. */
+function manifestRows(meta) {
+  const rows = [];
+  if (meta.strategy_name) rows.push(["Strategy", meta.strategy_name]);
+  if (meta.indicators) {
+    rows.push(["Indicators", meta.indicators.length
+      ? h("span", {}, meta.indicators.map((i) => i.name).join(", "), " ",
+        h("span", { class: "muted" }, `(code versions ${meta.indicators.map((i) => i.version).join(", ")})`))
+      : "None"]);
+  }
+  const p = meta.requested_period;
+  if (p) {
+    rows.push(["Period asked for", p.years ? `Last ${short(p.years)} year${p.years === 1 ? "" : "s"}`
+      : p.start || p.end ? `${p.start ? day(p.start) : "the first candle"} to ${p.end ? day(p.end) : "the latest candle"}` : "All the price data loaded"]);
+  }
+  const tz = meta.timezone;
+  if (tz) {
+    rows.push(["Time zones", `Candle times in ${tz.prices}; market time zone ${tz.market} (days for loss limits, CSV times without a zone); ` +
+      `daily candles end at ${tz.candle_alignment === "utc" ? "midnight UTC" : "5pm New York"}`]);
+  }
+  if (meta.libraries) rows.push(["Software", `Python ${meta.libraries.python}, pandas ${meta.libraries.pandas}, numpy ${meta.libraries.numpy}`]);
+  return rows;
+}
+
+/** Save the run record as a JSON file. */
+function downloadRecord(meta) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(meta, null, 2)], { type: "application/json" }));
+  const name = String(meta.strategy_name || "backtest").replace(/[^\w-]+/g, "-").slice(0, 40);
+  const a = h("a", { href: url, download: `run-record-${name}-${String(meta.tested_at || "").slice(0, 10)}.json` });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /**

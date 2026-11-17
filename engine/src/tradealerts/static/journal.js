@@ -208,13 +208,20 @@ export async function viewJournal() {
 }
 
 
-/** How each setup, tag, mood and plan-following did: trades, won, P/L. Hidden when nothing is tagged. */
+/** How each setup, tag, mood, plan-following, market (when there are several) and linked strategy did:
+ * trades, won, P/L, plus the trades open now by market. Hidden when there is nothing to split by. */
 function breakdownPanel(b, sym) {
+  const markets = b.market || [], strategies = b.strategy || [], open = b.open_by_market || [];
   const groups = [["Setup", b.setup, (v) => v], ["Tag", b.tags, (v) => "#" + v], ["Mood", b.mood, (v) => v],
-    ["Followed the plan", b.followed_plan, (v) => (v === "yes" ? "Yes" : "No")]].filter(([, rows]) => rows.length);
+    ["Followed the plan", b.followed_plan, (v) => (v === "yes" ? "Yes" : "No")],
+    ["Market", markets.length > 1 ? markets : [], marketName],
+    ["Strategy", strategies, (v) => v]].filter(([, rows]) => rows.length);
   if (!groups.length) return null;
+  const openLine = open.length ? h("p", { class: "small muted" }, "Open now: " +
+    open.map((x) => `${marketName(x.value)} ${x.trades} trade${x.trades === 1 ? "" : "s"}`).join(", ") + ".") : null;
   return h("div", { class: "panel" }, h("section", { class: "section" },
-    h("h2", {}, "Breakdown", infoTip("Closed trades only. A trade with several tags counts under each of them.")),
+    h("h2", {}, "Breakdown", infoTip("Closed trades only. A trade with several tags counts under each of them. Strategy counts trades linked to a forward-test trade.")),
+    openLine,
     h("div", { class: "table-wrap" }, h("table", { class: "trades breakdown" },
       h("thead", {}, h("tr", {}, h("th", {}, "By"), h("th", {}, "Value"), h("th", { class: "num" }, "Trades"), h("th", { class: "num" }, "Won"), h("th", { class: "num" }, "P/L"))),
       h("tbody", {}, groups.flatMap(([name, rows, label]) => rows.map((r, i) => h("tr", {},

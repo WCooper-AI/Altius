@@ -247,7 +247,7 @@ def portfolio(parts: list[tuple], balance: float, currency: str, notes: list[str
         "metrics": out["metrics"], "per_strategy": out["per_strategy"], "correlation": out["correlation"],
         "equity": _points(out["equity"]), "drawdown": _points(out["drawdown"]),
         "open_risk": _points(out["open_risk"]), "currency": currency, "notes": notes,
-        "exposure": out["exposure"], "skipped": out.get("skipped"),
+        "exposure": out["exposure"], "skipped": out.get("skipped"), "risk": out.get("risk"),
         "weighting": weighting, "weights": {sid: w * 100 for sid, w in weights.items()},
         "shared": bool(options.get("shared")),
         "pnl_curves": {sid: _points(out["pnl_curves"][sid]) for sid in out["pnl_curves"].columns},

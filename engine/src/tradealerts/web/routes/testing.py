@@ -5,9 +5,10 @@ from __future__ import annotations
 import copy
 import os
 
+import pandas as pd
 from fastapi import APIRouter, Body, Depends, Request
 
-from ... import __version__, analysis, compute, stages, versions
+from ... import __version__, analysis, compute, manifest, sidebyside, stages, versions
 from ...backtest import MAX_SPLIT_PCT, MIN_SPLIT_PCT
 from ...jobs import Busy
 from ...recipes import RecipeError, build_strategy
@@ -109,6 +110,7 @@ def stamp(ws: Workspace, s, body: dict, metrics: dict, out: dict | None = None) 
         "engine_version": __version__,
         "rules_hash": versions.rules_fingerprint(body["data"]),
         "version": version,                # saved version these exact rules match, if any
+        **manifest.reproducibility(s, body),  # name, rules, indicator code versions, period asked, time zones
         "market": s.market.label,
         "symbol": s.market.symbol,
         "source": SOURCE_NAMES.get(source, source),
@@ -427,3 +429,61 @@ def job_cancel(request: Request, job_id: str, ws: Workspace = Depends(workspace)
     if not ctx_of(request).jobs.cancel(ws.owner, job_id):
         err(404, "That run has finished and been cleared, or never existed")
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- strategies side by side
+
+
+def _compare_period(body: dict) -> dict:
+    """The same fixed dates for every strategy: "the last N years" becomes a start and end date
+    once, so backtests run one after another can't drift apart."""
+    years = body.get("years")
+    if years not in (None, ""):
+        if isinstance(years, bool) or not isinstance(years, (int, float)) or not 0 < years <= 20:
+            err(422, "The test period must be between 1 and 20 years")
+        now = pd.Timestamp.now(tz="UTC")
+        return {"start": (now - pd.Timedelta(days=round(years * 365.25))).date().isoformat(),
+                "end": now.date().isoformat()}
+    out = {}
+    for k in ("start", "end"):
+        if body.get(k):
+            try:
+                out[k] = pd.Timestamp(str(body[k])).date().isoformat()
+            except ValueError:
+                err(422, "Dates must look like 2025-01-31")
+    if "start" in out and "end" in out and out["start"] > out["end"]:
+        err(422, "The start date must be before the end date")
+    return out
+
+
+@router.post("/api/compare/setup")
+def compare_setup(body: dict = Body(...), ws: Workspace = Depends(workspace)):
+    """Each chosen strategy's rules, with the settings ticked in ``match`` (market, account,
+    costs) copied from the ``reference`` strategy, what changed in each, and one fixed period.
+    The page then backtests each one as returned."""
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not 2 <= len(ids) <= 4 or not all(isinstance(x, str) for x in ids):
+        err(422, "Choose 2 to 4 strategies")
+    if len(set(ids)) != len(ids):
+        err(422, "Each strategy can only be chosen once")
+    ref = body.get("reference") or ids[0]
+    if ref not in ids:
+        err(422, "Take the shared settings from one of the chosen strategies")
+    match = body.get("match") or {}
+    if not isinstance(match, dict):
+        err(422, "match must be an object")
+    items = []
+    for sid in ids:
+        data = read_raw(strategy_path(ws, sid))
+        if not isinstance(data, dict):
+            err(422, "That strategy file can't be read")
+        items.append((sid, str(data.get("name") or sid), data))
+    period = _compare_period(body)
+    try:
+        out = sidebyside.same_footing(items, ids.index(ref), [k for k, v in match.items() if v is True])
+    except ValueError as exc:
+        err(422, str(exc))
+    out["period"] = period
+    if not period.get("start"):
+        out["same"].append("No start date was given, so each one starts where its own price data starts.")
+    return clean(out)

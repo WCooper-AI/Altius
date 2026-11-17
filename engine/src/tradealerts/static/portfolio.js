@@ -134,6 +134,7 @@ function renderPortfolio(res, strategies) {
         h("td", { class: "num" }, num(p.max_drawdown_pct, 1) + "%")))))),
   ]);
   if (res.exposure) box.appendChild(exposureSection(res.exposure, m, sym));
+  if (res.risk) box.appendChild(riskSection(res.risk, res.per_strategy, sym));
   if (res.correlation) {
     const c = res.correlation;
     box.appendChild(h("div", { class: "corr" }, h("h3", {}, "Do they move together?"),
@@ -243,5 +244,52 @@ function exposureSection(ex, m, sym) {
       sec.appendChild(h("p", { class: "small muted" }, "Everything trades the same market, so one bad day there hits every strategy at once."));
     }
   }
+  return sec;
+}
+
+
+// --------------------------------------------------------------------- portfolio: combined risk
+
+const days = (n) => (n < 1 ? "under a day" : `${num(n, 0)} day${Math.round(n) === 1 ? "" : "s"}`);
+const pctOrDash = (v, d = 0) => (v === null || v === undefined ? "–" : signed(v, "%", d));
+
+/* The combined balance's worst fall and volatility, how concentrated the risk was, and each
+   strategy's part in the day-to-day swings and in the worst fall. */
+function riskSection(r, per, sym) {
+  const sec = h("div", { class: "corr risk" }, h("h3", {}, "Combined risk"));
+  const bits = [];
+  const w = r.worst_drawdown;
+  if (w) {
+    bits.push(`The combined balance fell furthest by ${num(w.depth_pct, 1)}%, from its high on ${day(w.peak)} to its low on ${day(w.trough)} (${days(w.days_down)}); ` +
+      (w.recovered ? `it was back at that high ${days(w.days_to_recover)} later.` : "it was not back at that high by the end of the test."));
+  } else bits.push("The combined balance never fell below a previous high.");
+  const l = r.longest_below_high;
+  if (l) bits.push(`Longest time below a previous high: ${days(l.days)}${l.recovered ? "" : ", still below at the end"}.`);
+  if (r.daily_volatility_pct !== null && r.daily_volatility_pct !== undefined) {
+    bits.push(`Volatility: the combined balance's daily changes had a standard deviation of ${num(r.daily_volatility_pct, 2)}% over ${r.days} days (weekends included), ` +
+      `about ${num(r.yearly_volatility_pct, 1)}% over a year.`);
+  }
+  sec.appendChild(h("p", { class: "small muted" }, bits.join(" ")));
+  const conc = [];
+  if (r.largest_risk_share) conc.push(`Largest share of the day-to-day risk: ${r.largest_risk_share.name}, ${num(r.largest_risk_share.pct, 0)}%.`);
+  if (r.largest_profit_share) conc.push(`Largest share of the profit: ${r.largest_profit_share.name}, ${num(r.largest_profit_share.pct, 0)}%.`);
+  if (r.effective_strategies) {
+    conc.push(`Effective number of strategies: ${num(r.effective_strategies, 1)} of ${r.strategies}. It equals the number of strategies when each one's daily swings are the same size, ` +
+      "and is nearer 1 the more one strategy's swings outweigh the rest.");
+  }
+  if (conc.length) sec.appendChild(h("p", { class: "small muted" }, conc.join(" ")));
+  sec.appendChild(h("div", { class: "table-wrap" }, h("table", { class: "trades" },
+    h("thead", {}, h("tr", {}, h("th", {}, "Strategy"), h("th", { class: "num" }, "Own daily swing"),
+      h("th", { class: "num" }, "Share of day-to-day risk"), h("th", { class: "num" }, "Result in the worst fall"),
+      h("th", { class: "num" }, "Share of the worst fall"))),
+    h("tbody", {}, per.map((p, i) => h("tr", {}, h("td", {}, h("span", { class: "swatch", style: `--swatch:${seriesColour(i)}` }), p.name),
+      h("td", { class: "num" }, p.daily_swing_pct === null || p.daily_swing_pct === undefined ? "–" : num(p.daily_swing_pct, 2) + "%"),
+      h("td", { class: "num" }, pctOrDash(p.risk_share_pct)),
+      h("td", { class: "num " + ((p.drawdown_pnl || 0) >= 0 ? "gain" : "loss") }, signedMoney(p.drawdown_pnl || 0, sym)),
+      h("td", { class: "num" }, pctOrDash(p.drawdown_share_pct))))))));
+  sec.appendChild(h("p", { class: "small muted" },
+    "Own daily swing: the standard deviation of the strategy's daily result, as a % of the starting balance. " +
+    "Share of day-to-day risk: its part of the variance of the combined daily result; the shares add up to 100%, and a negative share means its days tended to offset the others'. " +
+    "Share of the worst fall: its profit or loss from the high before the combined balance's worst fall to the low, as a share of the whole fall; a negative share means it made money while the balance fell."));
   return sec;
 }

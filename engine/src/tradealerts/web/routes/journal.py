@@ -152,6 +152,15 @@ def _breakdown(rows: list[dict], key) -> list[dict]:
     return sorted(out, key=lambda b: (-b["trades"], b["value"]))
 
 
+def _open_by(rows: list[dict], key) -> list[dict]:
+    """Trades still open (no exit yet), counted per value of a field: where the money sits now."""
+    counts: dict[str, int] = {}
+    for r in rows:
+        if r.get("exit_price") is None and key(r) not in (None, ""):
+            counts[str(key(r))] = counts.get(str(key(r)), 0) + 1
+    return [{"value": v, "trades": n} for v, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))]
+
+
 def _equity(rows: list[dict]) -> list[list]:
     """Running P/L after each closed trade, oldest first: [[exit_time, cumulative], ...]."""
     closed = sorted((r for r in rows if r["pnl"] is not None), key=lambda r: (r["exit_time"], r["id"]))
@@ -169,14 +178,19 @@ def journal(tag: str = Query(""), setup: str = Query(""), mood: str = Query(""),
     filtered; the breakdowns always cover every closed trade so you can compare."""
     with ws.store(create=False) as store:
         rows = _rows(store) if store else []
+        names = {r["strategy_id"]: r.get("name") or r["strategy_id"] for r in reversed(store.runs())} if store else {}  # newest name wins
     shown = [r for r in rows if _matches(r, tag, setup, mood, followed_plan)]
     plan = lambda r: None if r["followed_plan"] is None else ("yes" if r["followed_plan"] else "no")  # noqa: E731
+    strategy = lambda r: names.get(r.get("strategy_id"), r.get("strategy_id"))  # noqa: E731
     return clean({"entries": shown, "summary": _summary(shown), "equity": _equity(shown),
                   "filter": {"tag": tag, "setup": setup, "mood": mood, "followed_plan": followed_plan},
                   "breakdowns": {"tags": _breakdown(rows, lambda r: r["tags"]),
                                  "setup": _breakdown(rows, lambda r: r.get("setup")),
                                  "mood": _breakdown(rows, lambda r: r.get("mood")),
-                                 "followed_plan": _breakdown(rows, plan)},
+                                 "followed_plan": _breakdown(rows, plan),
+                                 "market": _breakdown(rows, lambda r: r.get("market")),
+                                 "strategy": _breakdown(rows, strategy),
+                                 "open_by_market": _open_by(rows, lambda r: r.get("market"))},
                   "moods": list(MOODS)})
 
 

@@ -1030,7 +1030,6 @@ body.has-fullscreen::after { content: ""; position: fixed; inset: 0; z-index: 69
 .swatch.line { width: .9rem; height: .22rem; border-radius: 2px; vertical-align: middle; }
 .swatch.line.s1 { background: var(--accent); } .swatch.line.s2 { background: #ff9f0a; } .swatch.line.s3 { background: #30d158; } .swatch.line.s4 { background: #bf5af2; }
 .compare-out { display: grid; gap: 1rem; }
-.compare-table td.best { color: var(--accent-text); font-weight: 700; }
 
 /* ================================================================== dashboard extras */
 .onboard .progress { height: .4rem; border-radius: 999px; background: var(--glass-thin); margin: .8rem 0 1rem; overflow: hidden; }
