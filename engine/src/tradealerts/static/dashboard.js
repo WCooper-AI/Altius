@@ -406,11 +406,11 @@ function describeComparison(r, res) {
   const elapsed = new Date(last[0]) - new Date(pts[0][0]);
   const now = pct(r.balance);
   let where;
-  if (r.balance < last[1]) where = "below the usual range: worse than 9 in 10 stretches of the backtest";
+  if (r.balance < last[1]) where = "below the usual range: below 9 in 10 stretches of the backtest";
   else if (r.balance < last[2]) where = "in the lower part of the usual range";
   else if (r.balance <= last[4]) where = "inside the middle half of the backtest's results";
   else if (r.balance <= last[5]) where = "in the upper part of the usual range";
-  else where = "above the usual range: better than 9 in 10 stretches of the backtest";
+  else where = "above the usual range: above 9 in 10 stretches of the backtest";
   append(out, [
     h("p", {}, `Over stretches as long as this test has run (${span(elapsed)}), the middle half of the backtest's results were between `,
       h("strong", {}, signed(pct(last[2]), "%")), " and ", h("strong", {}, signed(pct(last[4]), "%")),

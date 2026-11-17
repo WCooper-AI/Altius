@@ -610,9 +610,9 @@ function renderHoldout(ho, best, label) {
   const gap = b.train_return_pct - b.holdout_return_pct;
   let verdict;
   if (!b.holdout_trades) verdict = "It made no trades in the kept-back part, so nothing was learned about it there.";
-  else if (b.holdout_return_pct <= 0) verdict = "It lost money on the part it never saw: its result above owes a lot to fitting the past.";
+  else if (b.holdout_return_pct <= 0) verdict = "It lost money on the part it never saw, after making money on the part it was ranked on.";
   else if (gap > Math.max(5, Math.abs(b.train_return_pct) * 0.5)) verdict = "It still made money on the part it never saw, but less. Expect live results nearer the kept-back figure.";
-  else verdict = "It held up on the part it never saw, which is the best sign a backtest can give.";
+  else verdict = "It made money on both the part it was ranked on and the part it never saw.";
   const hind = ho.hindsight && ho.hindsight.values.join() !== b.values.join() ? ` The combination that did best on the kept-back part alone was ${label(ho.hindsight.values)} (${signed(ho.hindsight.holdout_return_pct, "%")}), but you could only know that with hindsight.` : "";
   return h("div", { class: "walk holdout" }, h("h3", {}, "Kept-back check", infoTip("The last part of the period was not used for ranking. The winner's result there is the closest thing a backtest has to a fresh test.")),
     h("p", {}, `From ${day(ho.from)} to ${day(ho.to)} (the last ${ho.pct}%), the winner made `,
@@ -674,7 +674,7 @@ function renderWalkForwardGrid(wf, label) {
   if (wf.skipped) return h("div", { class: "walk" }, h("h3", {}, "Walk-forward check", tip), h("p", { class: "muted small" }, wf.skipped));
   const gap = wf.hindsight_pct - wf.walk_forward_pct;
   let verdict = "Tuning as you went would have done about as well as picking the best combination with hindsight: the settings are not very sensitive to when you choose them.";
-  if (wf.walk_forward_pct <= 0) verdict = "Tuning as you went would have lost money, so the good results above depend on knowing the best combination in advance.";
+  if (wf.walk_forward_pct <= 0) verdict = "Tuning as you went would have lost money; the positive results above depend on knowing the best combination in advance.";
   else if (gap > Math.max(5, Math.abs(wf.hindsight_pct) * 0.5)) verdict = "Much of the best combination's result came from hindsight. Expect live results closer to the walk-forward figure.";
   return h("div", { class: "walk" }, h("h3", {}, "Walk-forward check", tip),
     h("p", {}, `From ${day(wf.from)} to ${day(wf.to)}, re-picking the best combination before each of ${wf.folds} stretches would have made `,
@@ -719,7 +719,7 @@ function heatmap(rows, axes, res, fmtScore) {
           r ? (r.enough_trades ? fmtScore(r.score) : "·") : "");
       })))));
   return h("div", { class: "table-wrap" }, table, h("p", { class: "small muted" },
-    `Each cell is the best ${axes.length > 2 ? "over the third setting " : ""}for that pair. Greener is better; a dot means too few trades. Look for a green area, not a lone bright cell.`));
+    `Each cell is the best ${axes.length > 2 ? "over the third setting " : ""}for that pair. A greener cell scored higher; a dot means too few trades. Look for a green area, not a lone bright cell.`));
 }
 
 function optionLabel(setting, v) {
@@ -772,7 +772,7 @@ function renderSweep(res, setting, onUse) {
 function renderWalkForward(wf, setting) {
   const gap = wf.hindsight_pct - wf.walk_forward_pct;
   let verdict;
-  if (wf.walk_forward_pct <= 0) verdict = "Tuning as you went would have lost money, so the good results above depend on knowing the best value in advance.";
+  if (wf.walk_forward_pct <= 0) verdict = "Tuning as you went would have lost money; the positive results above depend on knowing the best value in advance.";
   else if (gap > Math.max(5, Math.abs(wf.hindsight_pct) * 0.5)) verdict = "Much of the best value's result came from hindsight. Expect live results closer to the walk-forward figure.";
   else verdict = "Choosing from past data held up reasonably well on the data that came after it.";
   return h("div", { class: "walk" }, h("h3", {}, "Walk-forward check", infoTip("Splits the period into stretches. Before each stretch it picks the value that did best on all the data so far, then records how that value did on the stretch. Every choice only uses the past, like tuning for real would.")),

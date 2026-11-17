@@ -23,6 +23,7 @@ The work goes through five stages, and the app shows where each strategy is:
 | [Security](security.md) | Passwords and sessions, browser protections, secrets, backups, the hosted edition's limits, reporting a problem |
 | [Troubleshooting](troubleshooting.md) | Common problems and what they mean |
 | [Developer architecture](architecture.md) | Modules, request flow, storage, jobs, the two editions, tests and CI |
+| [Limitations and known issues](limitations.md) | What the tool doesn't do, what it approximates, and low-severity items the project's own audits left open |
 
 Not financial advice: see [engine/DISCLAIMER.md](../engine/DISCLAIMER.md). Licence: GNU AGPL-3.0,
 see the [README](../README.md#licence-and-editions).

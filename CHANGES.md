@@ -1,3 +1,89 @@
+# Unreleased
+
+User-visible and behaviour changes from the project's own code, quantitative and security
+audits and their follow-up sessions, not yet given a version number.
+
+## Changes to existing backtest results
+
+- **New York 4-hour and daily candles no longer drift an hour after a clock change.** They were
+  cut every fixed 24 (or 4) hours of real time from the first day's 17:00 New York, so after
+  each clock change they started an hour off, including a one-hour "daily candle" every weekend
+  for roughly half of any multi-month test. Candles are now cut on the New York wall clock, so
+  the candle spanning a clock change is 23 or 25 hours, like a broker's own charts. **This
+  changes indicator values, signals and every metric on affected backtests** (anything built
+  from finer candles on a 4h/1d timeframe — the default alignment — covering more than a few
+  months); OANDA's own hourly-and-above candles were not affected. See [Backtesting
+  methodology, point 6](docs/backtesting.md#signals-and-fills).
+- **A stop closer than the spread now fills at the price you'd actually get**, not at the stop
+  price itself, on the entry candle as well as later ones. Backtests where a tight stop sits
+  inside the spread will show a bigger loss on those trades than before.
+- **Shared-account replays keep a flat per-fill commission fixed when resizing a trade**,
+  instead of scaling it with the new size; portfolios using the shared account with a flat
+  commission will see a small change to its figures.
+- **Candles with an impossible high or low are still repaired, but now counted** as
+  `repaired_bars` in the metrics and flagged as a data-quality warning, where they previously
+  passed silently.
+
+## New in testing and validation
+
+- Multiple-testing correction (Bonferroni and Benjamini-Hochberg) on the optimiser's
+  combinations, and a neighbouring-settings (plateau/peak) check; a block-bootstrap 95% range
+  for the Sharpe and Sortino ratios that allows for linked (overlapping) trades; results broken
+  down by calendar year and by market condition; a Wilson range for the share of trades won;
+  one **Robustness summary** on the Testing screen gathering the latest backtest, luck check
+  and optimiser results. See [Statistical validation](docs/validation.md).
+- A reproducibility **run record**: engine, library and indicator versions, the period as asked
+  for, and the rules themselves, downloadable as JSON from any backtest. **Compare backtests**
+  (`Strategies → Compare`) lines up two to four strategies' results side by side without
+  marking a winner. **Combined risk** adds drawdown depth/length, volatility and concentration
+  figures to the portfolio page. See [Backtesting methodology](docs/backtesting.md) and
+  [Strategy development](docs/strategies.md).
+- Automated data-quality notes for a possible stock split or dividend (an overnight move or
+  pattern that looks like one), never adjusted automatically; provider and trading-hours facts
+  on every run record. See [Data providers](docs/data-providers.md).
+
+## Reliability and alerts
+
+- **Alert delivery retries with a growing backoff** (up to about 30 minutes) before it's
+  reported as failed, and Settings shows each channel's last delivered/last failed time; a
+  retry after Altius crashes right after a channel accepted a message can occasionally send it
+  twice (at-least-once delivery), rather than an alert being silently dropped within its retry
+  budget.
+- A crash partway through catching up several missed candles can no longer leave a trade or
+  alert committed with the live checker's cursor still pointing before it (each candle's
+  trade, event, equity point and cursor now land in one database transaction).
+- Background jobs (the optimiser, luck checks) now survive a restart; a job still running at
+  shutdown comes back as a plain "the server restarted while this was running" failure instead
+  of vanishing.
+- `tradealerts check-db` and an automatic integrity check at startup; `tradealerts
+  verify-backup` and an automatic check right after a backup is made; `GET /api/health` for a
+  short machine-readable status. See [Troubleshooting](docs/troubleshooting.md) and [API
+  reference](docs/api.md).
+
+## Security
+
+- A sign-in throttle race that let parallel password guesses skip the wait is closed (check
+  and count now happen together).
+- **Self-hosted without a password now refuses API requests that arrive through a reverse
+  proxy** (`X-Forwarded-For`/`X-Real-IP`/`Forwarded` present), rather than trusting them as
+  local. See [Running on a server](docs/self-hosting.md).
+- The hosted edition's alert address checks now refuse a webhook whose first response is a
+  redirect to a different host, closing a redirect-based bypass of its address checks.
+- `config.yaml`, the session secret and restore safety copies are written owner-only; CI now
+  runs `pip-audit` and gitleaks on every push and weekly.
+
+## Documentation and evidence
+
+- [benchmarks/](benchmarks/README.md): a few example strategies on the deterministic Sample
+  data market with their expected backtest metrics committed alongside them, rerun and checked
+  with `tradealerts benchmark`.
+- A [Limitations and known issues](docs/limitations.md) page, and a developer installation
+  walkthrough in [docs/install.md](docs/install.md#for-developers).
+
+Full detail, including the lower-severity items left open rather than fixed, is in
+`Building Docs/audits/` (code, quantitative and security audits) and in each session's own
+commit message.
+
 # Changes in 0.3.1
 
 ## Maths fixes

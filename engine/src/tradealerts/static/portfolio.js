@@ -138,7 +138,7 @@ function renderPortfolio(res, strategies) {
   if (res.correlation) {
     const c = res.correlation;
     box.appendChild(h("div", { class: "corr" }, h("h3", {}, "Do they move together?"),
-      h("p", { class: "small muted" }, "Correlation of each pair's daily results: near 1 means they win and lose on the same days (less spread of risk), near 0 means unrelated, below 0 means they tend to offset each other."),
+      h("p", { class: "small muted" }, "Correlation of each pair's daily results: near 1 means they win and lose on the same days, near 0 means they move independently, below 0 means they tend to move in opposite directions."),
       h("div", { class: "table-wrap" }, h("table", { class: "trades corr-table" },
         h("thead", {}, h("tr", {}, h("th", {}), c.ids.map((id) => h("th", { class: "num", title: name(id) }, name(id).slice(0, 18))))),
         h("tbody", {}, c.ids.map((id, i) => h("tr", {}, h("th", {}, name(id)), c.values[i].map((v, j) => {
@@ -219,14 +219,15 @@ function exposureSection(ex, m, sym) {
   const bits = [];
   if (m.avg_correlation !== null && m.avg_correlation !== undefined) {
     const c = m.avg_correlation;
-    const verdict = c > 0.5 ? "they mostly move together, so the mix spreads risk less than it looks" :
-      c > 0.2 ? "they move together some of the time" : c > -0.2 ? "they are largely unrelated, which spreads the risk" :
-      "they tend to offset each other";
+    const verdict = c > 0.5 ? "they mostly move together" :
+      c > 0.2 ? "they move together some of the time" : c > -0.2 ? "they are largely unrelated" :
+      "they tend to move in opposite directions";
     bits.push(`On average the pairs' daily results have a correlation of ${num(c, 2)}: ${verdict}.`);
   }
   if (m.diversification_ratio) {
     bits.push(`Diversification ratio ${num(m.diversification_ratio, 2)}: the strategies' day-to-day swings add up to ` +
-      `${num(m.diversification_ratio, 1)}× the combined account's swing (1 means no benefit from mixing them; higher is better).`);
+      `${num(m.diversification_ratio, 1)}× the combined account's swing (at 1, combining them leaves the swing the same size ` +
+      `as the sum of the separate ones; a bigger number means the combined swing is smaller than that sum).`);
   }
   const overlap = Object.entries(ex.overlap_pct || {}).map(([k, v]) => [Number(k), v]).sort((a, b) => a[0] - b[0]);
   if (overlap.length) {

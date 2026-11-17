@@ -1,12 +1,15 @@
-# Trading Alerts engine
+# Altius engine
 
-The Python package (`tradealerts`) behind both editions of Trading Alerts: the backtester,
-forward-test runner, alerts, SQLite storage and the web interface. The self-hosted edition
-runs it for one person; the hosted service runs it for many customers (see `cloud/`).
+The Python package (`tradealerts`) behind both editions of **Altius** (this repository's
+GitHub name, `trading-alerts`, predates that name): the backtester, forward-test runner,
+alerts, SQLite storage and the web interface. The self-hosted edition runs it for one
+person; the hosted service runs it for many customers (see `cloud/`).
 
 The full documentation, including the [YAML reference](../docs/yaml-reference.md),
 [backtesting methodology](../docs/backtesting.md) and [developer architecture](../docs/architecture.md),
 is in [docs/](../docs/README.md). This page is the short reference kept next to the code.
+
+Needs Python 3.11+. Licensed under the GNU AGPL-3.0 (see [../LICENSE](../LICENSE)).
 
 ## Layout
 
