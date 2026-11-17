@@ -25,7 +25,9 @@ function showLogin() {
   if (window.cloudAccount) { window.cloudAccount.showSignIn(); return; } // hosted: email and password
   const pw = h("input", { type: "password", id: "pw", autocomplete: "current-password", required: true });
   const msg = h("p", { class: "loss small", "aria-live": "polite" });
-  const form = h("form", {}, h("div", { class: "field" }, h("label", { for: "pw" }, "Password"), pw), msg,
+  const form = h("form", {},
+    h("div", { class: "login-head" }, h("h1", {}, "Altius"), h("p", { class: "muted" }, "Sign in to manage your strategies.")),
+    h("div", { class: "field" }, h("label", { for: "pw" }, "Password"), pw), msg,
     h("button", { class: "primary", type: "submit" }, "Sign in"));
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -33,8 +35,7 @@ function showLogin() {
     try { await POST("/login", { password: pw.value }); boot(); }
     catch (err) { msg.textContent = err.message; pw.select(); }
   });
-  clear($main).appendChild(h("div", { class: "login" }, h("h1", {}, "Altius"),
-    h("p", { class: "muted" }, "Sign in to manage your strategies."), form));
+  clear($main).appendChild(h("div", { class: "login" }, form));
   pw.focus();
 }
 
