@@ -1245,17 +1245,35 @@ function marginText(r, meta) {
   return parts.join("; ");
 }
 
+/** Plain facts about the price source itself (price definition, adjusted or not, spread
+ * availability, usual history coverage), independent of this one backtest's settings. */
+function providerFactsList(pf) {
+  if (!pf) return null;
+  const spread = pf.spread_available === true ? "Available" : pf.spread_available === false ? "Not available"
+    : "Depends on the file";
+  return h("ul", { class: "small" }, [
+    h("li", {}, `Price: ${pf.price}`),
+    h("li", {}, pf.adjusted),
+    h("li", {}, `Spread data: ${spread}`),
+    h("li", {}, `Typical history available: ${pf.history}`),
+  ]);
+}
+
 /** What exactly was tested, so the same backtest can be run again and compared. */
 function testStamp(meta, sym, quality) {
   const rules = meta.version ? `Version ${meta.version} of this strategy` : "Unsaved changes (not a saved version)";
   const spread = meta.used_data_spread ? "Real bid/ask from the price data" : `${short(meta.spread)} price points`;
   const r = meta.risk || {};
   const issues = (quality && quality.issues) || [];
+  const session = meta.session;
   const rows = [
     ["Rules", h("span", {}, rules, " ", h("span", { class: "muted" }, `(fingerprint ${meta.rules_hash})`))],
     ...manifestRows(meta),
     ["Market", `${meta.market} (${meta.symbol})`],
     ["Price data", meta.prices ? `${meta.source}. ${meta.prices}` : meta.source],
+    ...(meta.provider_facts ? [["Data source details", providerFactsList(meta.provider_facts)]] : []),
+    ...(session ? [["Trading hours assumed", `${session.hours}. ${session.weekend}. Worked out from `
+      + `${session.calendar_text}.`]] : []),
     ["Candle size", meta.timeframe],
     ["Period", `${day(meta.start)} to ${day(meta.end)}`],
     ["Warm-up before the period", meta.warmup_candles ? `${meta.warmup_candles} candles` : "None (the data starts here)"],
