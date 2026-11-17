@@ -49,11 +49,21 @@ what the server refuses to do without one.
 ## For developers
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
+git clone https://github.com/WCooper-AI/trading-alerts.git
+cd trading-alerts
+python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e "engine[dev,yahoo]"
-pytest engine/tests
-tradealerts serve        # http://localhost:8321
+pytest engine/tests                                # the test suite (coverage ≥85%, enforced in CI)
+tradealerts serve                                  # http://localhost:8321
+
+npm ci                                              # once, for the interface's JS linter
+npm run lint:js                                     # ESLint over static/ (no build step; it's plain ES modules)
 ```
+
+The `benchmarks/` folder has a few example strategies on the deterministic built-in Sample
+data market with their known-good backtest metrics committed next to them: `tradealerts
+benchmark` reruns them and reports anything that no longer matches, a quick sanity check that
+a change to the simulator didn't quietly change its answers.
 
 | Extra | Adds | Needed for |
 |---|---|---|

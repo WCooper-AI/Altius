@@ -7,8 +7,12 @@ Open source under [GNU AGPL-3.0](LICENSE). Runs locally on your own computer or 
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg)](https://www.python.org/downloads/)
+[![Tests](https://github.com/WCooper-AI/trading-alerts/actions/workflows/tests.yml/badge.svg)](https://github.com/WCooper-AI/trading-alerts/actions/workflows/tests.yml)
+[![Security](https://github.com/WCooper-AI/trading-alerts/actions/workflows/security.yml/badge.svg)](https://github.com/WCooper-AI/trading-alerts/actions/workflows/security.yml)
+[![CodeQL](https://github.com/WCooper-AI/trading-alerts/actions/workflows/codeql.yml/badge.svg)](https://github.com/WCooper-AI/trading-alerts/actions/workflows/codeql.yml)
+[![Coverage ≥85%](https://img.shields.io/badge/coverage-%E2%89%A585%25-brightgreen.svg)](#development)
 
-[First 5 Minutes](#your-first-5-minutes-with-altius) · [Features](#key-features) · [Install](#install-self-hosted-free) · [Methodology](#backtesting-methodology--transparency) · [Privacy & Architecture](#privacy--architecture) · [Self-Hosted vs Hosted](#self-hosted-vs-hosted) · [Documentation](docs/README.md) · [Development](#development) · [Licence](#licence-and-editions)
+[First 5 Minutes](#your-first-5-minutes-with-altius) · [Features](#key-features) · [Install](#install-self-hosted-free) · [Methodology](#backtesting-methodology--transparency) · [Privacy & Architecture](#privacy--architecture) · [Self-Hosted vs Hosted](#self-hosted-vs-hosted) · [Documentation](docs/README.md) · [Development](#development) · [Limitations](docs/limitations.md) · [Licence](#licence-and-editions)
 
 ## See Altius in action
 
@@ -100,10 +104,12 @@ Details: [backtesting methodology](docs/backtesting.md), [statistical validation
 
 ```mermaid
 flowchart LR
-    D["Data Providers\n(Yahoo, Dukascopy, OANDA, CSV)"] --> E["Altius Engine\n(Backtester, Validation, Forward Simulator)"]
-    E <--> S[("Local Storage\nSQLite & YAML")]
-    E --> UI["Web UI & Desktop App\n(Plain JS / Tauri)"]
-    E --> A["Alert System\n(ntfy, Telegram, Discord, Slack, Email, Webhook)"]
+    D["Data Providers\n(Yahoo, Dukascopy, OANDA, CSV)"] --> ENG["Engine & Simulator\n(backtester, forward tests)"]
+    ENG <--> ST[("Storage\nstate.db (SQLite) & Parquet/CSV cache")]
+    ENG --> API["Web API\n(FastAPI)"]
+    API --> UI["Browser UI & Desktop App\n(plain JS / Tauri)"]
+    ENG --> RUN["Runner\n(live checks)"]
+    RUN --> NOT["Notifiers\n(ntfy, Telegram, Discord, Slack, Email, Webhook)"]
 ```
 
 - **Local storage & zero telemetry:** Your strategies, backtests, journal entries, and API credentials (such as OANDA tokens) are stored locally in `~/TradingAlerts` as SQLite and YAML. Altius sends **no telemetry**.
@@ -149,11 +155,13 @@ flowchart LR
 | [Security](docs/security.md) | Passwords, sessions, secrets, backups, the hosted edition |
 | [Troubleshooting](docs/troubleshooting.md) | Common problems and what they mean |
 | [Developer architecture](docs/architecture.md) | Modules, request flow, storage, jobs, tests and CI |
+| [Limitations and known issues](docs/limitations.md) | What the tool doesn't do, what it approximates, and low-severity items the project's own audits left open |
 
 ## Development
 
 ```text
 engine/      Python package: engine, web interface (plain JS, no framework), tests
+benchmarks/  A few example strategies with committed, reproducible backtest results
 selfhost/    Setup scripts, Docker files, and the desktop app (Tauri)
 scripts/     release.py builds the downloadable zip
 ```
@@ -161,9 +169,17 @@ scripts/     release.py builds the downloadable zip
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e "engine[dev,yahoo]"
-pytest engine/tests
-tradealerts serve        # http://localhost:8321
+pytest engine/tests       # the test suite; coverage must stay at 85% or above (see below)
+tradealerts serve         # http://localhost:8321
 ```
+
+The full walkthrough, including cloning the repository and linting the JavaScript interface,
+is in [Installation, For developers](docs/install.md#for-developers). Tests, security
+scanning (`pip-audit`, gitleaks) and CodeQL all run in CI on every push and pull request (the
+badges at the top of this page link to the latest runs). Test coverage must stay at 85% or
+above or CI fails; the exact current number is in each `tests.yml` run's job summary (the
+"Tests (with coverage on 3.12)" step), or run `cd engine && pytest -q --cov --cov-report=term`
+yourself.
 
 ## Licence and editions
 
