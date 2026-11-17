@@ -126,6 +126,14 @@ CREATE TABLE IF NOT EXISTS settings_kv (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS strategy_tests (
+    strategy_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    rules_hash TEXT,
+    at TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (strategy_id, kind)
+);
 CREATE INDEX IF NOT EXISTS idx_runs_strategy ON runs (strategy_id, stopped_at);
 CREATE INDEX IF NOT EXISTS idx_trades_run ON paper_trades (run_id);
 """ + LOGIN_ATTEMPTS
@@ -554,6 +562,34 @@ class StateStore:
 
     def delete_versions(self, strategy_id: str) -> None:
         self.db.execute("DELETE FROM strategy_versions WHERE strategy_id = ?", (strategy_id,))
+        self.db.commit()
+
+    # ------------------------------------------------------------------ tests run on a strategy (its stage)
+
+    def add_test(self, strategy_id: str, kind: str, rules_hash: str | None = None) -> None:
+        """Note that a test of ``kind`` (backtest, split, luck, optimise, sweep) ran on the
+        strategy: the latest time, the rules it ran on, and how many times, per kind."""
+        self.db.execute(
+            "INSERT INTO strategy_tests (strategy_id, kind, rules_hash, at, count) VALUES (?, ?, ?, ?, 1) "
+            "ON CONFLICT(strategy_id, kind) DO UPDATE SET rules_hash = excluded.rules_hash, at = excluded.at, "
+            "count = strategy_tests.count + 1",
+            (strategy_id, kind, rules_hash, _now()),
+        )
+        self.db.commit()
+
+    def tests(self, strategy_id: str) -> list[dict]:
+        rows = self.db.execute("SELECT kind, rules_hash, at, count FROM strategy_tests WHERE strategy_id = ? ORDER BY at",
+                               (strategy_id,))
+        return [dict(r) for r in rows]
+
+    def all_tests(self) -> dict[str, list[dict]]:
+        out: dict[str, list[dict]] = {}
+        for r in self.db.execute("SELECT strategy_id, kind, rules_hash, at, count FROM strategy_tests ORDER BY at"):
+            out.setdefault(r["strategy_id"], []).append({k: r[k] for k in ("kind", "rules_hash", "at", "count")})
+        return out
+
+    def delete_tests(self, strategy_id: str) -> None:
+        self.db.execute("DELETE FROM strategy_tests WHERE strategy_id = ?", (strategy_id,))
         self.db.commit()
 
     # ------------------------------------------------------------------ small settings

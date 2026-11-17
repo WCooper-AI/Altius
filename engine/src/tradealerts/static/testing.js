@@ -116,7 +116,7 @@ function rangeValues(from, to, step, integer) {
 }
 
 /** Backtest, Compare settings and Luck check, sharing one test period. */
-export function analysisPanel({ getData, render, intro, settings, apply, runLabel = "Run backtest", strategyId = null }) {
+export function analysisPanel({ getData, render, intro, settings, apply, runLabel = "Run backtest", strategyId = null, onRan = null }) {
   const period = periodPicker({ custom: true });
   const TABS = [["backtest", "Backtest"], ["sweep", "Compare settings"], ["optimise", "Optimiser"], ["luck", "Luck check"]];
   let current = pref("ta-tool", "backtest");
@@ -144,6 +144,7 @@ export function analysisPanel({ getData, render, intro, settings, apply, runLabe
       savePref("ta-did-backtest", "1");
       clear(btOut).appendChild(render(res));
       btRun.textContent = "Test again";
+      if (onRan) onRan("backtest");
     } catch (e) { clear(btOut).appendChild(h("p", { class: "error-box" }, e.message)); }
     finally { btRun.disabled = false; }
   });
@@ -202,8 +203,9 @@ export function analysisPanel({ getData, render, intro, settings, apply, runLabe
     const setting = chosen.kind === "knob" ? { kind: "knob", key: chosen.key } : { kind: "path", path: chosen.path };
     clear(swOut).appendChild(h("p", { class: "loading" }, `Running ${values.length} backtests. This can take a minute…`));
     try {
-      const res = await POST("/sweep", { data, setting, values, ...period.value() });
+      const res = await POST("/sweep", { data, setting, values, strategy_id: strategyId, ...period.value() });
       clear(swOut).appendChild(renderSweep(res, chosen, apply ? (v) => { apply(chosen, v); chosen = { ...chosen, current: v }; toast(`${chosen.label} set to ${optionLabel(chosen, v)}`); } : null));
+      if (onRan) onRan("sweep");
     } catch (e) { clear(swOut).appendChild(h("p", { class: "error-box" }, e.message)); }
     finally { swRun.disabled = false; }
   });
@@ -213,7 +215,7 @@ export function analysisPanel({ getData, render, intro, settings, apply, runLabe
     h("div", { class: "tool-actions" }, swRun), swOut);
 
   // --- optimiser
-  const opt = optimiserPane({ fetchData, settings, apply, period });
+  const opt = optimiserPane({ fetchData, settings, apply, period, strategyId, onRan });
 
   // --- luck check
   const lkOut = h("div");
@@ -225,8 +227,9 @@ export function analysisPanel({ getData, render, intro, settings, apply, runLabe
     lkRun.disabled = true;
     clear(lkOut).appendChild(h("p", { class: "loading" }, "Backtesting on up to 200 random price paths and reshuffling the trades. This takes up to a minute…"));
     try {
-      clear(lkOut).appendChild(renderLuck(await POST("/luck", { data, trials, ...period.value() })));
+      clear(lkOut).appendChild(renderLuck(await POST("/luck", { data, trials, strategy_id: strategyId, ...period.value() })));
       lkRun.textContent = "Check again";
+      if (onRan) onRan("luck");
     } catch (e) { clear(lkOut).appendChild(h("p", { class: "error-box" }, e.message)); }
     finally { lkRun.disabled = false; }
   });
@@ -261,6 +264,7 @@ export function analysisPanel({ getData, render, intro, settings, apply, runLabe
       }
     }
   };
+  panel.show = show; // open one of the tools from elsewhere on the page (the stage strip's "Go there")
   return panel;
 }
 
@@ -272,7 +276,7 @@ const HOLDOUT_OPTIONS = [[0, "Nothing: rank on the whole period"], [20, "The las
 const FOLD_OPTIONS = [[0, "Off"], [3, "3 stretches"], [4, "4 stretches"], [5, "5 stretches"], [6, "6 stretches"]];
 function comboCap() { return typeof isHosted === "function" && isHosted() ? 200 : 2000; }
 
-function optimiserPane({ fetchData, settings, apply, period }) {
+function optimiserPane({ fetchData, settings, apply, period, strategyId = null, onRan = null }) {
   let list = [];
   let axes = [newAxis()];
   let score = pref("ta-opt-score", "return");
@@ -389,7 +393,7 @@ function optimiserPane({ fetchData, settings, apply, period }) {
     if (!data) return;
     const chosenAxes = ready.map((a) => ({ ...a.chosen }));
     const body = {
-      data, score, min_trades: minTrades, holdout_pct: holdout, walk_forward: folds, ...period.value(),
+      data, score, min_trades: minTrades, holdout_pct: holdout, walk_forward: folds, strategy_id: strategyId, ...period.value(),
       settings: ready.map((a) => ({ setting: a.chosen.kind === "knob" ? { kind: "knob", key: a.chosen.key } : { kind: "path", path: a.chosen.path }, values: a.values })),
     };
     run.disabled = true;
@@ -398,6 +402,7 @@ function optimiserPane({ fetchData, settings, apply, period }) {
     try {
       const r = await POST("/optimise", body);
       job = r.job;
+      if (onRan) onRan("optimise");
       poll(job, chosenAxes);
     } catch (e) { finish(); clear(out).appendChild(h("p", { class: "error-box" }, e.message)); }
   });

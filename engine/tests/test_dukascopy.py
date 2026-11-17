@@ -106,7 +106,7 @@ def test_no_data_at_all_is_explained():
 
 
 def test_every_built_in_market_has_a_dukascopy_name():
-    assert all(m["dukascopy"].startswith("INSTRUMENT_") for m in MARKETS)
+    assert all(m["dukascopy"].startswith("INSTRUMENT_") for m in MARKETS if not m.get("sample"))
     prov, sym = data_mod.MarketProvider({}).resolve("us500")  # default source
     assert isinstance(prov, data_mod.DukascopyProvider) and sym == "INSTRUMENT_IDX_AMERICA_E_SANDP_500"
 
@@ -117,7 +117,8 @@ def test_real_library_has_the_instrument_names():
     duka, ins = p.lib()
     assert hasattr(duka, "fetch") and hasattr(duka, "INTERVAL_HOUR_1") and duka.OFFER_SIDE_ASK
     for m in MARKETS:
-        assert hasattr(ins, m["dukascopy"]), m["dukascopy"]
+        if not m.get("sample"):
+            assert hasattr(ins, m["dukascopy"]), m["dukascopy"]
 
 
 def test_offline_fails_fast_with_a_clear_message():

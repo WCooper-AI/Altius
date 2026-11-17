@@ -1044,6 +1044,21 @@ body.has-fullscreen::after { content: ""; position: fixed; inset: 0; z-index: 69
 .steps-list li.done .step-check { background: var(--gain); color: #fff; box-shadow: none; }
 .steps-list a { font-weight: 600; color: var(--accent-text); text-decoration: none; }
 
+/* the five stages of a strategy (widgets.js stageStrip) */
+.stages { margin: .75rem 0 0; }
+.stage-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .4rem; }
+.stage { display: flex; align-items: flex-start; gap: .5rem; padding: .5rem .65rem; border-radius: var(--radius); background: var(--glass-thin); border: 1px solid var(--line-soft); min-width: 0; }
+.stage-mark { width: 1.3rem; height: 1.3rem; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: .72rem; font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--line); }
+.stage.done .stage-mark { background: var(--gain); color: #fff; box-shadow: none; }
+.stage.changed .stage-mark { background: var(--warn); }
+.stage.current { border-color: var(--accent); }
+.stage.current .stage-mark { box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent-text); }
+.stage.todo { color: var(--muted); }
+.stage-text { display: flex; flex-direction: column; min-width: 0; }
+.stage-text strong { font-size: var(--step--1); }
+.stage-next { margin: .5rem 0 0; max-width: 80ch; }
+.stage-next a { font-weight: 600; color: var(--accent-text); }
+
 /* sticky section bar in the full editor */
 .section-nav { position: sticky; top: 5.2rem; z-index: 5; display: flex; gap: .3rem; flex-wrap: wrap; padding: .6rem 1.2rem;
   background: linear-gradient(180deg, var(--sheen), transparent) var(--glass-strong); border-bottom: 1px solid var(--line-soft);

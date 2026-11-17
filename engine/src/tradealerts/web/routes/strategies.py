@@ -11,8 +11,9 @@ import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import Response
 
-from ... import indicators, instruments, rules
-from ...recipes import MARKETS, RECIPES, RecipeError, build_strategy, preview_strategy, still_matches_recipe
+from ... import indicators, instruments, rules, stages
+from ...recipes import (MARKETS, RECIPES, RecipeError, build_strategy, example_settings, preview_strategy,
+                        still_matches_recipe)
 from ...strategy import (ID_RE, StrategyError, dump_strategy, load_strategy, read_raw, strategy_files,
                          upgrade_legacy_market)
 from ...workspace import Workspace
@@ -114,6 +115,18 @@ def build_recipe(body: dict = Body(...), ws: Workspace = Depends(workspace)):
 # ---------------------------------------------------------------- strategies
 
 
+def has_channel(c) -> bool:
+    """Whether any alert channel other than the server log is turned on."""
+    return any(isinstance(n, dict) and n.get("type") != "console" and n.get("enabled", True) is not False
+               for n in c.notifiers)
+
+
+def stage_block(c, sid: str, data: dict, error: str | None, run: dict | None, tests: list[dict],
+                earlier_runs: int) -> dict:
+    return stages.status(data, tests, run, error=error, rules_hash=None if error else versions.rules_fingerprint(data),
+                         channels=has_channel(c), earlier_runs=earlier_runs)
+
+
 @router.get("/api/strategies")
 def list_strategies(request: Request, ws: Workspace = Depends(workspace)):
     c = ws.config()
@@ -121,6 +134,11 @@ def list_strategies(request: Request, ws: Workspace = Depends(workspace)):
     with ws.store(create=False) as store:
         items = []
         files = strategy_files(c.strategies_dir)
+        tests = store.all_tests() if store else {}
+        stopped: dict[str, int] = {}
+        for r in (store.runs() if store else []):
+            if r.get("stopped_at"):
+                stopped[r["strategy_id"]] = stopped.get(r["strategy_id"], 0) + 1
         for sid, path in files.items():
             item: dict[str, Any] = {"id": sid, "file": path.name}
             try:
@@ -142,6 +160,7 @@ def list_strategies(request: Request, ws: Workspace = Depends(workspace)):
             if run:
                 eq = store.equity(run["id"])
                 item["spark"] = run_series(run, eq, eq[-1][1] if eq else run["start_balance"], 40)
+            item["stages"] = stage_block(c, sid, item["data"], item["error"], run, tests.get(sid, []), stopped.get(sid, 0))
             items.append(item)
         events = store.recent_events(1) if store else []
     return clean({"strategies": items, "last_event": events[0] if events else None})
@@ -158,13 +177,38 @@ def get_strategy(sid: str, ws: Workspace = Depends(workspace)):
         problem = str(exc)
     run = None
     version = None
+    tests: list[dict] = []
+    earlier = 0
     with ws.store(create=False) as store:
         if store is not None:
             v = versions.sync(store, sid, p, ws.limits.max_versions)
             version = v["version_no"] if v else None
             active = store.active_run(sid)
             run = run_summary(store, active, with_series=False) if active else None
-    return clean({"id": sid, "file": p.name, "data": data, "error": problem, "run": run, "version": version})
+            tests = store.tests(sid)
+            earlier = sum(1 for r in store.runs() if r["strategy_id"] == sid and r.get("stopped_at"))
+    block = stage_block(ws.config(), sid, data, problem, run, tests, earlier)
+    return clean({"id": sid, "file": p.name, "data": data, "error": problem, "run": run, "version": version,
+                  "stages": block})
+
+
+SAMPLE_RECIPE = "trend"
+
+
+@router.post("/api/strategies/sample", status_code=201)
+def create_sample_strategy(ws: Workspace = Depends(workspace)):
+    """A ready-to-test draft on the built-in sample market: the "follow the trend" idea with its
+    textbook example settings on made-up prices, for trying the tool with nothing to download."""
+    data = build_strategy(SAMPLE_RECIPE, "sample", example_settings(SAMPLE_RECIPE))
+    data["name"] = "Sample: follow the trend"
+    data["template"] = True  # a draft: never sends alerts until the person turns them on
+    data["description"] = ("Made-up prices and textbook example settings, for trying the tool. "
+                           "Not a real market, and not a suggestion for one.")
+    data = tidy_recipe(data)
+    validate(ws, data)
+    sid = save_new(ws, data)
+    record_version(ws, sid, "Created from sample data")
+    return {"id": sid}
 
 
 @router.post("/api/validate")
@@ -322,6 +366,7 @@ def delete_strategy(sid: str, ws: Workspace = Depends(workspace)):
             store.stop_run(sid)
             store.reset(sid)
             store.delete_versions(sid)  # forward tests keep their own copy of the rules they ran on
+            store.delete_tests(sid)
     return {"deleted": sid}
 
 

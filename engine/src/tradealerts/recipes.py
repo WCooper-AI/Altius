@@ -29,6 +29,7 @@ from typing import Any, Callable
 #   and commodities, 5:1 shares, 2:1 crypto). A starting value to check with a broker.
 # exchange: exchange_calendars code for markets that only trade in exchange hours.
 # symbol / oanda: the market's name at each data source (chosen in Settings).
+# sample: made-up prices generated locally (data.SampleProvider), whatever source is chosen.
 MARKETS: list[dict[str, Any]] = [
     {"key": "us500", "news": ["USD"], "label": "US 500", "symbol": "ES=F", "dukascopy": "INSTRUMENT_IDX_AMERICA_E_SANDP_500", "oanda": "SPX500_USD", "funding": 6.0, "group": "Indices", "spread": 0.5, "point_value": 1, "quote": "USD", "tick": 0.1, "margin": 5,
      "note": "The 500 biggest US companies (S&P 500)"},
@@ -70,6 +71,11 @@ MARKETS: list[dict[str, Any]] = [
     {"key": "nvda", "news": ["USD"], "label": "Nvidia (NVDA)", "symbol": "NVDA", "dukascopy": "INSTRUMENT_US_NVDA_US_USD", "oanda": None,
      "funding": 6.0, "borrow": 1.0, "commission": 0.0, "group": "Stocks", "exchange": "XNYS", "spread": 0.03, "point_value": 1, "quote": "USD", "tick": 0.01, "margin": 20,
      "note": "Trades in New York hours only"},
+    # Sample data: made-up prices generated on this computer, so the tool can be tried with
+    # nothing to download. Shaped like an index CFD (24/5, no commission).
+    {"key": "sample", "news": [], "label": "Sample data", "symbol": "SAMPLE", "dukascopy": None, "oanda": None, "sample": True,
+     "funding": 6.0, "group": "Try it out", "spread": 0.5, "point_value": 1, "quote": "USD", "tick": 0.1, "margin": 5,
+     "note": "Made-up prices for trying the tool, not a real market"},
 ]
 MARKETS_BY_KEY = {m["key"]: m for m in MARKETS}
 MARKETS_BY_SYMBOL = {m["symbol"]: m for m in MARKETS}

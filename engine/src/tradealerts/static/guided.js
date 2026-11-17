@@ -1,13 +1,13 @@
 /* Trading Alerts web interface: Guided setup for beginners and the simple editor for guided strategies.
    ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
 
-import { $main, app, append, ask, attempt, clear, clone, CURRENCY, day, DEL, h, money, nf, num, POST, PUT, signed,
+import { $main, app, append, ask, attempt, clear, clone, CURRENCY, day, DEL, GET, h, money, nf, num, POST, PUT, signed,
   toast } from "./util.js";
 import { describeStrategy, isBlank, markBlanks, renderParts, shareButtons, statusControls } from "./describe.js";
 import { choiceSelect, numberInput, timeInput } from "./editor.js";
 import { confirmLive, historyLink, savedToast, viewEditor, withRunningChoice } from "./strategies.js";
 import { analysisPanel, knobSettings, lineChart, renderBacktest } from "./testing.js";
-import { candleChart } from "./widgets.js";
+import { candleChart, stageStrip } from "./widgets.js";
 import { refreshStatus, setNav } from "./boot.js";
 
 // --------------------------------------------------------------------- guided setup (beginners)
@@ -340,7 +340,7 @@ export async function viewCreate(preset) {
 
 // ----- simple editor for strategies made with the guided setup
 
-export async function viewSimple(id, data, run) {
+export async function viewSimple(id, data, run, stages = null) {
   setNav("strategies");
   const recipe = recipeById(data.recipe.id);
   if (!recipe) return viewEditor(id, null, data, run);
@@ -404,7 +404,21 @@ export async function viewSimple(id, data, run) {
 
   const title = h("input", { class: "title-input", value: data.name || "", "aria-label": "Strategy name",
     oninput: (e) => { data.name = e.target.value; markDirty(); } });
-  const statusSeg = statusControls({ id, isNew: false, run, getData: () => data, isDirty: () => dirty, save });
+  const statusSeg = statusControls({ id, isNew: false, run, getData: () => data, isDirty: () => dirty, save, onChange: refreshStages });
+  // the five stages (Research → Backtest → Validate → Paper trade → Monitor) and the one next step
+  const strip = stageStrip(stages, { go: (key) => {
+    if (key === "backtest" || key === "validate") {
+      results.show(key === "backtest" ? "backtest" : "luck");
+      results.scrollIntoView({ block: "start", behavior: "smooth" });
+    } else {
+      statusSeg.scrollIntoView({ block: "center", behavior: "smooth" });
+      const b = statusSeg.querySelectorAll("button")[key === "monitor" ? 1 : 0];
+      if (b) b.focus();
+    }
+  } });
+  async function refreshStages() {
+    try { strip.update((await GET("/strategies/" + encodeURIComponent(id))).stages); } catch (_) { /* keep what's shown */ }
+  }
   const marketSel = h("select", { "aria-label": "Market", onchange: (e) => { marketKey = e.target.value; changed(); } },
     [...new Set(app.recipes.markets.map((m) => m.group))].map((g) => h("optgroup", { label: g },
       app.recipes.markets.filter((m) => m.group === g).map((m) => h("option", { value: m.key }, m.label)))));
@@ -425,6 +439,7 @@ export async function viewSimple(id, data, run) {
     intro: "Test these settings on the market's price history. Unsaved changes are included.",
     settings: () => knobSettings(recipe, st),
     apply: (setting, value) => { st[setting.key] = value; renderForm(); changed(); },
+    onRan: refreshStages,
   });
 
   const head = h("div", { class: "editor-head" },
@@ -447,7 +462,7 @@ export async function viewSimple(id, data, run) {
           toast("Strategy deleted"); location.hash = "#/strategies";
         } }, "Delete"),
         h("button", { class: "primary", type: "button", onclick: save }, "Save changes"))),
-    sentence, validity);
+    sentence, validity, strip);
 
   const left = h("div", { class: "panel" },
     h("section", { class: "section" }, h("h2", {}, "Market and idea"),

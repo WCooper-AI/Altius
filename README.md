@@ -8,7 +8,7 @@ Open source under [GNU AGPL-3.0](LICENSE). Runs locally on your own computer or 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg)](https://www.python.org/downloads/)
 
-[First 5 Minutes](#your-first-5-minutes-with-altius) · [Features](#key-features) · [Install](#install-self-hosted-free) · [Methodology](#backtesting-methodology--transparency) · [Privacy & Architecture](#privacy--architecture) · [Self-Hosted vs Hosted](#self-hosted-vs-hosted) · [Development](#development)
+[First 5 Minutes](#your-first-5-minutes-with-altius) · [Features](#key-features) · [Install](#install-self-hosted-free) · [Methodology](#backtesting-methodology--transparency) · [Privacy & Architecture](#privacy--architecture) · [Self-Hosted vs Hosted](#self-hosted-vs-hosted) · [Documentation](docs/README.md) · [Development](#development) · [Licence](#licence-and-editions)
 
 ## See Altius in action
 
@@ -21,24 +21,30 @@ Open source under [GNU AGPL-3.0](LICENSE). Runs locally on your own computer or 
 
 ## From idea to live monitoring, without the black box
 
-Altius lets you define your own trading rules, test them against historical data, validate whether their performance could be down to luck, and monitor them against live market prices. **The exact same simulation engine powers both backtesting and forward-testing**, helping you compare expected and observed behaviour—without handing over custody of your strategies or automating live orders.
+Altius is an independent platform for researching, validating and monitoring trading strategies. You define your own trading rules, test them against historical data, check whether their performance could be down to luck, and monitor them against live market prices. **The exact same simulation engine powers both backtesting and forward-testing**, helping you compare expected and observed behaviour—without handing over custody of your strategies or automating live orders.
 
 ## How it works
 
-1. **Define** – Build rules with Guided Setup, the visual rule builder, or YAML.
+Every strategy moves through five stages, and its page shows which ones are done and the one thing to do next:
+
+1. **Research** – Write the rules with Guided Setup, the visual rule builder, or YAML.
 2. **Backtest** – Simulate historical trades with realistic fills and transaction costs.
-3. **Validate** – Check robustness with train/test splits, Monte Carlo luck checks, and walk-forward optimisation.
-4. **Forward-test** – Paper-trade on live prices using the same simulator and a live-vs-backtest range check.
-5. **Alert** – Receive notifications on your phone or desktop via ntfy, Telegram, Discord, Slack, email, or webhook.
+3. **Validate** – Check robustness with train/test splits, luck checks, and optimiser hold-out and walk-forward.
+4. **Paper trade** – Forward-test on live prices with the same simulator, without risking money.
+5. **Monitor** – Get alerts on your phone or desktop via ntfy, Telegram, Discord, Slack, email, or webhook, and compare live trades with the backtest's usual range.
+
+The stage strip only records what has been done. It never says whether a result is good or bad.
 
 ## Your first 5 minutes with Altius
 
 1. **Install and launch Altius** using `./setup.sh` (Linux/macOS) or `setup.ps1` (Windows), then open `http://localhost:8321`.
-2. **Select a market**, such as `EUR/USD`, gold, or a US stock.
-3. **Choose a predefined strategy** from **Guided Setup** (or build your own in the visual rule builder).
-4. **Run your first backtest** on historical data.
-5. **Inspect the performance metrics**, equity curve, drawdown, and Luck Check results.
-6. **Set up an alert** (e.g. Telegram or ntfy) to get notified when your rule triggers on live prices.
+2. **Press "Try it with sample data".** It saves a draft strategy on made-up prices generated on your computer, so there is nothing to download. Results on sample data say nothing about a real market.
+3. **Run your first backtest** and read the results, the equity curve, and the "How this was tested" record.
+4. **Run the Luck Check** to see how much of the result could be chance.
+5. **Start a forward test** to follow the rules on live prices.
+6. **Create a strategy on a real market**, such as `EUR/USD`, gold, or a US stock, with Guided Setup, and set up an alert (e.g. Telegram or ntfy) for when it triggers.
+
+The full walkthrough is in the [user guide](docs/user-guide.md).
 
 ## Key features
 
@@ -88,6 +94,8 @@ Trust is critical in trading software. Altius is explicit about how simulations 
 - **Statistical validation:** Includes train/test splits, **Luck Check** (Monte Carlo and random price paths), and an Optimiser with hold-out and anchored walk-forward testing.
 - **Paper trading & data limitations:** Forward tests run on live prices using the same simulator, paired with a live-vs-backtest range check. Historical and live data accuracy depends on your chosen provider (Yahoo Finance, Dukascopy, OANDA, or your own CSVs).
 
+Details: [backtesting methodology](docs/backtesting.md), [statistical validation](docs/validation.md), [data providers](docs/data-providers.md).
+
 ## Privacy & architecture
 
 ```mermaid
@@ -126,6 +134,22 @@ flowchart LR
 | **Transaction cost modelling** | More realistic simulations (spread, slippage, funding, commission) |
 | **No automated execution** | Clear operational boundaries—alerts only, never places trades |
 
+## Documentation
+
+| | |
+|---|---|
+| [Installation](docs/install.md) | Self-hosted setup, developer install and extras, the hosted edition |
+| [User guide](docs/user-guide.md) | The pages, the five stages, alerts, sample data, backups |
+| [Strategy development](docs/strategies.md) | Guided setup, the rule builder, markets, versions, sharing, portfolios |
+| [YAML reference](docs/yaml-reference.md) | Every key in a strategy file and in `config.yaml` |
+| [Backtesting methodology](docs/backtesting.md) | Fills, costs, sizing, loss limits, margin, currencies, the run record |
+| [Statistical validation](docs/validation.md) | Train/test split, luck check, optimiser checks, live-vs-backtest ranges |
+| [Data providers](docs/data-providers.md) | Dukascopy, Yahoo, OANDA, CSV, sample data, caching, data-quality checks |
+| [API reference](docs/api.md) | The JSON API, headers, errors, background jobs |
+| [Security](docs/security.md) | Passwords, sessions, secrets, backups, the hosted edition |
+| [Troubleshooting](docs/troubleshooting.md) | Common problems and what they mean |
+| [Developer architecture](docs/architecture.md) | Modules, request flow, storage, jobs, tests and CI |
+
 ## Development
 
 ```text
@@ -141,9 +165,21 @@ pytest engine/tests
 tradealerts serve        # http://localhost:8321
 ```
 
-## Licence
+## Licence and editions
 
 Copyright (C) 2026 William Cooper. This program is free software: you can redistribute it
 and/or modify it under the terms of the GNU Affero General Public License, version 3. If you
 run a modified version as a service other people use over a network, you must offer them
 its source code. See [LICENSE](LICENSE).
+
+| | Self-hosted edition | Hosted edition |
+|---|---|---|
+| **What it is** | Everything in this repository: the engine, the web interface, the setup scripts, the desktop app | A paid service run by William Cooper on the same engine |
+| **Licence** | GNU AGPL-3.0 | A subscription under the service's own terms; you get the service, not a copy of its code |
+| **Code** | All of it is here | The engine is this repository. The accounts, billing and multi-customer server code is a separate private project and is not covered by this licence. |
+| **Your data** | On your own computer or server | On the hosted server, for your account |
+
+The copyright holder can offer the engine under other terms as well, which is what lets the
+hosted edition include it alongside closed-source code. That does not change your rights under
+the AGPL to the code in this repository. Contributions are accepted under the terms in
+[CONTRIBUTING.md](CONTRIBUTING.md), which include a licence that allows this.

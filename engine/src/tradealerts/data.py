@@ -657,6 +657,19 @@ class DukascopyProvider(Provider):
         return _with_fine(self._candles(symbol, base, start), timeframe, alignment)
 
 
+class SampleProvider(Provider):
+    """The built-in "Sample data" market: made-up prices generated on this computer (see
+    ``sample.py``), so the tool can be tried with nothing to download. Not a real market."""
+
+    def fetch_bars(self, symbol, timeframe, lookback_days, alignment=DEFAULT_ALIGNMENT):
+        from .sample import sample_bars
+
+        df = sample_bars()
+        if lookback_days and not df.empty:
+            df = df[df.index >= df.index[-1] - pd.Timedelta(days=lookback_days)]
+        return _with_fine(df, timeframe, alignment)
+
+
 class MarketProvider(Provider):
     """Markets picked from the built-in list (``provider: auto``), fetched from
     whichever data source is chosen in Settings."""
@@ -671,6 +684,8 @@ class MarketProvider(Provider):
         market = MARKETS_BY_KEY.get(key)
         if not market:
             raise DataError(f"Unknown market {key!r}")
+        if market.get("sample"):
+            return SampleProvider(), key
         source = self.cfg.get("source", "dukascopy")
         if source == "dukascopy":
             return DukascopyProvider(self.cache_dir), market["dukascopy"]
@@ -715,6 +730,10 @@ def provider_for(cfg, name: str, tz: str = "UTC") -> Provider:
                         data_cfg=cfg.data, cache_dir=cfg.cache_dir)
 
 
+SAMPLE_NOTE = ("These are made-up prices generated on this computer so you can try the tool. "
+               "They are not a real market, and results on them say nothing about any real market.")
+
+
 def data_notes(symbol: str, provider: str, data_cfg: dict | None = None) -> list[str]:
     """Plain-language caveats about where the prices came from."""
     data_cfg = data_cfg or {}
@@ -723,6 +742,8 @@ def data_notes(symbol: str, provider: str, data_cfg: dict | None = None) -> list
     if provider == "auto":
         from .recipes import MARKETS_BY_KEY
         m = MARKETS_BY_KEY.get(symbol, {})
+        if m.get("sample"):
+            return [SAMPLE_NOTE]
         real = m.get("symbol", symbol)
     notes = []
     if source == "yahoo":

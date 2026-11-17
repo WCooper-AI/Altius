@@ -38,6 +38,24 @@
   `config.yaml`. Full backups carry the values; restoring stores them again. Settings says
   where they are kept. `tradealerts serve --no-keychain` keeps them in `config.yaml`.
 
+## Getting started, stages and documentation
+
+- **Sample data.** A built-in *Sample data* market of made-up prices generated on your
+  computer: nothing to download, the same past every time, and new candles as time passes so a
+  forward test works too. **Try it with sample data** (on the first screen and the dashboard,
+  or `POST /api/strategies/sample`) saves a ready-to-test draft on it. Every result on it says
+  it is not a real market.
+- **Five stages.** Each strategy's page shows Research → Backtest → Validate → Paper trade →
+  Monitor: which are done, when, whether the rules changed since a test, and the one next step
+  with a link to it. The strategies list shows the next stage; the dashboard's getting-started
+  checklist follows the same five steps. Facts only, no verdict on the results. Saved
+  strategies record each backtest, split, luck check, optimiser run and settings comparison
+  (`stages` in `/api/strategies` and `/api/strategies/{id}`).
+- **Documentation** in `docs/`: installation, user guide, strategy development, YAML
+  reference, backtesting methodology, statistical validation, data providers, API reference,
+  security, troubleshooting and developer architecture. The README explains how the AGPL
+  self-hosted edition and the paid hosted edition relate.
+
 ## Desktop app and testing
 
 - **Port handshake.** The engine binds its own socket and prints `TRADEALERTS_PORT=<n>`; the

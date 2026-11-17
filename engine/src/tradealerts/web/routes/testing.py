@@ -7,7 +7,7 @@ import os
 
 from fastapi import APIRouter, Body, Depends, Request
 
-from ... import __version__, analysis, compute, versions
+from ... import __version__, analysis, compute, stages, versions
 from ...backtest import MAX_SPLIT_PCT, MIN_SPLIT_PCT
 from ...jobs import Busy
 from ...recipes import RecipeError, build_strategy
@@ -31,6 +31,20 @@ def _run(request: Request, ws: Workspace, fn, *args):
         err(422, str(exc))
 
 
+def record_test(ws: Workspace, body: dict, *kinds: str) -> None:
+    """Remember that these tests ran on a saved strategy (``strategy_id`` in the request), so its
+    stage strip can say what has been done. Unsaved drafts leave no record."""
+    sid = body.get("strategy_id")
+    if not (isinstance(sid, str) and ID_RE.match(sid)):
+        return
+    if not (ws.config().strategies_dir / f"{sid}.yaml").exists():
+        return
+    fp = versions.rules_fingerprint(body.get("data"))
+    with ws.store() as store:
+        for kind in kinds:
+            store.add_test(sid, kind, fp)
+
+
 @router.post("/api/backtest")
 def backtest(request: Request, body: dict = Body(...), ws: Workspace = Depends(workspace)):
     s = validate(ws, body.get("data"))
@@ -42,6 +56,7 @@ def backtest(request: Request, body: dict = Body(...), ws: Workspace = Depends(w
     out = _run(request, ws, compute.backtest, body["data"], df, fine, test_start, notes,
                None if split is None else float(split))
     out["meta"] = stamp(ws, s, body, out["metrics"], out)
+    record_test(ws, body, *stages.test_kinds(body))
     return out
 
 
@@ -215,7 +230,9 @@ def sweep_settings(request: Request, body: dict = Body(...), ws: Workspace = Dep
         except Exception:  # an invalid variant is reported by the sweep itself
             pass
     df, fine, test_start, notes = load_period(ctx_of(request), ws, s, body, warmup=warmup)
-    return _run(request, ws, compute.sweep, variants, df, fine, test_start, s.risk.symbol, notes)
+    out = _run(request, ws, compute.sweep, variants, df, fine, test_start, s.risk.symbol, notes)
+    record_test(ws, body, "sweep")
+    return out
 
 
 @router.post("/api/luck")
@@ -223,7 +240,9 @@ def luck(request: Request, body: dict = Body(...), ws: Workspace = Depends(works
     s = validate(ws, body.get("data"))
     trials = _trials(body.get("trials"))
     df, fine, test_start, notes = load_period(ctx_of(request), ws, s, body)
-    return _run(request, ws, compute.luck, body["data"], df, fine, test_start, notes, trials)
+    out = _run(request, ws, compute.luck, body["data"], df, fine, test_start, notes, trials)
+    record_test(ws, body, "luck")
+    return out
 
 
 MAX_TRIALS = 1_000_000
@@ -385,6 +404,7 @@ def optimise(request: Request, body: dict = Body(...), ws: Workspace = Depends(w
                              float(holdout), int(folds), kind="optimise")
     except Busy as exc:
         err(429, str(exc))
+    record_test(ws, body, "optimise")
     return {"job": job, "combinations": len(combos)}
 
 

@@ -42,6 +42,10 @@ Docker on a server.
 
 ### Then, in the app
 
+To look around first, press **Try it with sample data**: it saves a draft on made-up prices
+generated on your computer, so there is nothing to download. Each strategy's page shows its
+five stages (Research → Backtest → Validate → Paper trade → Monitor) and the next step.
+
 1. **Create a strategy**: pick a market, pick an idea (buy the dip, follow the trend,
    bounce from oversold, moving average crossover or opening range breakout) and adjust a
    few plain-language settings.
@@ -153,4 +157,6 @@ self-host ntfy with an access token.
 ## Reference
 
 The strategy file format, every indicator, how the simulation fills trades, price data
-sources, CSV files and the command line are described in [engine/README.md](engine/README.md).
+sources, CSV files and the command line are described in [engine/README.md](engine/README.md),
+and in full in the `docs/` folder of the source repository (user guide, YAML reference,
+methodology, validation, data providers, API, security, troubleshooting).
