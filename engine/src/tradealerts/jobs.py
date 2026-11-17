@@ -23,6 +23,8 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any, Callable
 
+from .contracts import JobStatus
+
 log = logging.getLogger(__name__)
 
 KEEP_SECONDS = 900  # how long a finished job's result stays available
@@ -105,7 +107,7 @@ class _Job:
             self.error_type = error.__class__.__name__
         self.finished = time.time()
 
-    def public(self, result: bool = True) -> dict:
+    def public(self, result: bool = True) -> JobStatus:
         st = self.progress.state
         started = st.get("started")
         now = self.finished or time.time()
@@ -164,11 +166,11 @@ class _JobTable:
             j = self._jobs.get(job_id)
         return j if j and j.owner == (owner or "-") else None
 
-    def status(self, owner: str | None, job_id: str) -> dict | None:
+    def status(self, owner: str | None, job_id: str) -> JobStatus | None:
         j = self._get(owner, job_id)
         return j.public() if j else None
 
-    def list(self, owner: str | None, store=None) -> list[dict]:
+    def list(self, owner: str | None, store=None) -> list[JobStatus]:
         """This owner's jobs, newest first, without their results. With ``store``, jobs
         from before a restart that this process has no memory of are included too."""
         with self._jobs_lock:

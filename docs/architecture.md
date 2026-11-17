@@ -31,6 +31,7 @@ per-customer limits.
 | `stages.py` | The five-stage block (Research → Backtest → Validate → Paper trade → Monitor) computed from the store's test records, the active run and the alert status. |
 | `runner.py`, `watch.py`, `notify.py`, `news.py`, `weekly.py`, `pricealerts.py` | The live checker and what it sends: signals, paper trades, data and drawdown warnings, price alerts, news reminders, the weekly report; the channels. |
 | `workspace.py`, `config.py`, `state.py`, `versions.py`, `keychain.py`, `jobs.py` | One person's settings, folders and SQLite store; strategy versions; secrets in the password store; background jobs with a lifecycle (`queued`, `running`, `completed`, `failed`, `cancelled`). |
+| `contracts.py` | `Protocol`/`TypedDict` descriptions of the boundaries above, as they actually are (see "Formal contracts" below); no behaviour. |
 | `web/` | The FastAPI app (`app.py`: security headers, CSRF header check, `/api/v1` alias, versioned static files), `auth.py`, Pydantic models, and `routes/` with one module per area. |
 | `static/` | The interface as ES modules with no build step: `boot.js` is the entry; `util.js` imports nothing; `guided.js`, `editor.js`, `describe.js`, `testing.js`, `dashboard.js`, `markets.js`, `widgets.js` and the rest each own one area. |
 | `cli.py` | `tradealerts init / new / validate / backtest / check-data / run / serve / status / reset / test-alert / sample-data`. |
@@ -43,6 +44,27 @@ Testing routes validate the strategy data, load prices through `web/prices.load_
 job runner (`InlineJobs` self-hosted, `PoolJobs` hosted), stamp the result with the run record,
 and leave a test record for the strategy's stage strip. The runner polls on a timer, feeds
 closed candles to the same `Simulator`, and writes events and paper trades to the store.
+
+## Formal contracts
+
+`contracts.py` names the shapes at the boundaries below as they already are (a `Protocol`
+for anything with more than one implementation, a `TypedDict` for a plain dict that crosses
+a boundary); it does not change behaviour or add an abstraction layer. `tests/test_b7_contracts.py`
+checks every real implementation against its Protocol, that a real trade dict and backtest
+metrics dict have exactly the documented keys, that a couple of key API responses carry the
+documented keys, and that `simulator`/`backtest`/`analysis`/`stats`/`measures` never import
+FastAPI, Starlette, sqlite3, httpx or requests.
+
+| Boundary | Protocol / TypedDict | Implementations |
+|---|---|---|
+| Market data | `PriceProvider` | `CSVProvider`, `YahooProvider`, `OandaProvider`, `DukascopyProvider`, `SampleProvider`, `MarketProvider` (`data.py`) |
+| Strategy definition | `Strategy`, `Market`, `Risk` (dataclasses, not reinvented as a Protocol: there is one canonical representation) | `strategy.py` |
+| Simulation events | `TradeRecord` | `Simulator._close`'s `closed` event (`simulator.py`); persisted and read back by `StateStorage.add_trade`/`trades` |
+| Backtest results | `BacktestMetrics`, `BacktestAPIResponse` | `backtest.run_backtest`/`compute_metrics`; `POST /api/backtest` (`web/routes/testing.py`, built by `compute.backtest`) |
+| Notifications | `Notifier` | `ConsoleNotifier`, `NtfyNotifier`, `DiscordNotifier`, `TelegramNotifier`, `SlackNotifier`, `WebhookNotifier`, `EmailNotifier` (`notify.py`) |
+| Background jobs | `JobRunner`, `JobStatus`, `JobRecord` | `InlineJobs`, `PoolJobs` (`jobs.py`); persisted rows and `GET /api/jobs` |
+| Persistence | `StateStorage`, `RunRecord`, `DeliveryRecord` | `StateStore` (`state.py`); `POST /api/strategies/{id}/forward-test/start` returns a `RunRecord` as-is |
+| Operational status | `HealthStatus` | `GET /api/health` (`web/routes/status.py`) |
 
 ## Storage
 
