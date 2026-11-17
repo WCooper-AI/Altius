@@ -16,6 +16,7 @@ import socket
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
 from typing import Callable
@@ -168,6 +169,23 @@ NO_PASSWORD_BEHIND_PROXY = (
     "reachable from the internet. Set TRADEALERTS_PASSWORD and restart, or pass --no-auth if the proxy "
     "already checks who signs in.")
 
+def _startup_checks(ws: Workspace) -> None:
+    """Run once when the server starts: catch a damaged database early (rather than at some
+    unrelated request later), and close out any background job that was still going when
+    the process last stopped, so it doesn't sit as "running" forever."""
+    try:
+        with ws.store() as store:
+            problem = store.quick_check()
+            if problem:
+                log.error("state.db failed its integrity check: %s", problem)
+                now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+                store.add_event("", now, "db_problem",
+                                f"The database didn't pass its integrity check: {problem}\n"
+                                "Restore from a backup in Settings, or ask for help before it's overwritten.", False)
+            store.fail_stale_jobs("The server restarted while this was running.")
+    except Exception:
+        log.exception("Startup checks failed")
+
 
 def create_app(config_path: str | Path | None = None, password: str | None = None, runner=None,
                allowed_hosts: set[str] | None = None, desktop: bool = False, keychain: bool = False,
@@ -181,6 +199,7 @@ def create_app(config_path: str | Path | None = None, password: str | None = Non
     for sid in ws.migrate():
         log.info("%s: updated to follow Settings, Price data", sid)
     news.set_data_dir(c.data_dir)
+    _startup_checks(ws)
     auth = Auth(password, c.data_dir / ".session_secret", db_path=c.state_db)
     ctx = SelfHostContext(ws, auth, runner=runner, desktop=desktop)
 

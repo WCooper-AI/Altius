@@ -54,6 +54,17 @@ can send to your channels or read your ntfy topic.
 - Settings never sends a saved password or token back to the browser.
 - The hosted edition never reads or writes a password store, and expands no environment
   variables in a customer's settings.
+- Moving to a new computer: a full backup carries the secrets themselves (see Backups
+  below), so restoring it fills the new computer's password store again automatically. If
+  a setting still shows blank with "Saved. Leave blank to keep it" after a restore, that
+  secret wasn't carried over (for example a shareable backup, which never contains
+  secrets) — re-enter it once in Settings and save.
+- Rotating a token (replacing it with a new one, after revoking the old one with the
+  provider): saving the new value in Settings replaces the old one in the password store;
+  the old value isn't kept anywhere.
+- If the password store can't be reached (locked, missing, or the `keychain` extra isn't
+  installed), secrets stay in or are read from `config.yaml` instead. Nothing crashes;
+  Settings shows no "kept in ..." note in that case.
 
 ## Backups
 

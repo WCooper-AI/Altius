@@ -37,7 +37,15 @@ def shown(raw: dict, ws: Workspace) -> dict:
 
 @router.get("/api/settings")
 def get_settings(ws: Workspace = Depends(workspace)):
-    return shown(ws.raw_config(), ws)
+    out = shown(ws.raw_config(), ws)
+    with ws.store(create=False) as store:
+        status = store.channel_delivery_status() if store else {}
+    for kind, entry in out["notifiers"].items():
+        d = status.get(kind)
+        if d:
+            entry["last_sent"] = d.get("last_sent")
+            entry["last_failed"] = d.get("last_failed")
+    return out
 
 
 SECTION_NAMES = {"poll_minutes": "how often prices are checked", "notifiers": "where alerts are sent",

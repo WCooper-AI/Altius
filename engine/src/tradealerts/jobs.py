@@ -123,11 +123,33 @@ class _Job:
 
 
 class _JobTable:
-    """Bookkeeping shared by both runners: look up, list, report and cancel background jobs."""
+    """Bookkeeping shared by both runners: look up, list, report and cancel background jobs.
 
-    def __init__(self):
+    ``store_factory`` (if given), called with no arguments, returns a context manager
+    yielding a :class:`~tradealerts.state.StateStore` (or ``None``). When given, a job's
+    status is also saved there, so ``GET /api/jobs`` can still report it after a restart
+    (see :meth:`list` and :meth:`~tradealerts.state.StateStore.fail_stale_jobs`)."""
+
+    def __init__(self, store_factory: Callable[[], Any] | None = None):
         self._jobs: dict[str, _Job] = {}
         self._jobs_lock = threading.Lock()
+        self._store_factory = store_factory
+
+    def _persist(self, job: _Job) -> None:
+        if not self._store_factory:
+            return
+        try:
+            with self._store_factory() as store:
+                if store is not None:
+                    store.save_job(job.id, job.owner, job.kind, job.status, _iso(job.created),
+                                   _iso(job.progress.state.get("started")), _iso(job.finished),
+                                   job.error, job.error_type)
+        except Exception:  # a database problem here must never stop the job itself
+            log.debug("Could not save job %s's status", job.id, exc_info=True)
+
+    def _finish(self, job: _Job, result: Any = None, error: BaseException | None = None) -> None:
+        job.finish(result, error)
+        self._persist(job)
 
     def _add(self, job: _Job) -> None:
         with self._jobs_lock:
@@ -135,6 +157,7 @@ class _JobTable:
             for k in [k for k, j in self._jobs.items() if j.finished and j.finished < cutoff]:
                 del self._jobs[k]
             self._jobs[job.id] = job
+        self._persist(job)
 
     def _get(self, owner: str | None, job_id: str) -> _Job | None:
         with self._jobs_lock:
@@ -145,11 +168,28 @@ class _JobTable:
         j = self._get(owner, job_id)
         return j.public() if j else None
 
-    def list(self, owner: str | None) -> list[dict]:
-        """This owner's jobs, newest first, without their results."""
+    def list(self, owner: str | None, store=None) -> list[dict]:
+        """This owner's jobs, newest first, without their results. With ``store``, jobs
+        from before a restart that this process has no memory of are included too."""
         with self._jobs_lock:
             mine = [j for j in self._jobs.values() if j.owner == (owner or "-")]
-        return [j.public(result=False) for j in sorted(mine, key=lambda j: (j.created, j.order), reverse=True)]
+        ordered = sorted(mine, key=lambda j: (j.created, j.order), reverse=True)
+        out = [j.public(result=False) for j in ordered]
+        if store is not None:
+            known = {j.id for j in mine}
+            for row in store.jobs_for_owner(owner or "-"):
+                if row["id"] in known:
+                    continue
+                item = {"id": row["id"], "kind": row["kind"], "status": row["status"], "done": 0, "total": 0,
+                       "note": None, "created": row["created_at"], "started": row["started_at"],
+                       "finished": row["finished_at"], "waited": 0.0, "seconds": 0.0, "cpu_seconds": None}
+                if row["status"] == "failed":
+                    item["error"], item["error_type"] = row["error"], row["error_type"]
+                out.append(item)
+            # A stable sort on "created" alone keeps the in-memory jobs' own order (above)
+            # for any that tie, and interleaves jobs recovered from the database by time.
+            out.sort(key=lambda j: j["created"], reverse=True)
+        return out
 
     def cancel(self, owner: str | None, job_id: str) -> bool:
         j = self._get(owner, job_id)
@@ -193,11 +233,11 @@ class InlineJobs(_JobTable):
 
         def work():
             try:
-                job.finish(_call(fn, job.progress, *args))
+                self._finish(job, _call(fn, job.progress, *args))
             except BaseException as exc:  # noqa: BLE001 - reported to the user through status()
                 if not isinstance(exc, Cancelled):
                     log.warning("job %s failed: %s", job.id, exc)
-                job.finish(error=exc)
+                self._finish(job, error=exc)
 
         threading.Thread(target=work, name=f"job-{job.id}", daemon=True).start()
         return job.id
@@ -210,12 +250,12 @@ class InlineJobs(_JobTable):
 
 class PoolJobs(_JobTable):
     def __init__(self, workers: int, per_owner: int = 1, wait_seconds: float = 2.0, max_queue: int | None = None,
-                 timeout: float = 600):
+                 timeout: float = 600, store_factory: Callable[[], Any] | None = None):
         import multiprocessing
 
         from . import compute
 
-        super().__init__()
+        super().__init__(store_factory)
         self.workers = max(1, workers)
         # "spawn": a clean process, not a fork of a server with threads running
         self._mp = multiprocessing.get_context("spawn")
@@ -281,9 +321,9 @@ class PoolJobs(_JobTable):
         def done(f):
             watchdog.cancel()
             try:
-                job.finish(f.result())
+                self._finish(job, f.result())
             except BaseException as exc:  # noqa: BLE001 - reported to the user through status()
-                job.finish(error=exc)
+                self._finish(job, error=exc)
             finally:
                 self._free(sem)
 

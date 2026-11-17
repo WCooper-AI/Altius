@@ -134,8 +134,36 @@ CREATE TABLE IF NOT EXISTS strategy_tests (
     count INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (strategy_id, kind)
 );
+CREATE TABLE IF NOT EXISTS deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy_id TEXT,
+    run_id INTEGER,
+    channel TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT,
+    body TEXT,
+    priority TEXT,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    next_retry_at TEXT
+);
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    error TEXT,
+    error_type TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_runs_strategy ON runs (strategy_id, stopped_at);
 CREATE INDEX IF NOT EXISTS idx_trades_run ON paper_trades (run_id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_due ON deliveries (status, next_retry_at);
 """ + LOGIN_ATTEMPTS
 
 TRADE_COLS = [
@@ -202,7 +230,7 @@ class StateStore:
             return None
         return {"cursor": row["cursor"], "state": json.loads(row["state"]), "source_hash": row["source_hash"]}
 
-    def save(self, strategy_id: str, cursor: str, state: dict, source_hash: str = "") -> None:
+    def save(self, strategy_id: str, cursor: str, state: dict, source_hash: str = "", commit: bool = True) -> None:
         self.db.execute(
             "INSERT INTO strategy_state (strategy_id, cursor, state, source_hash, updated_at) "
             "VALUES (?, ?, ?, ?, ?) ON CONFLICT(strategy_id) DO UPDATE SET "
@@ -210,7 +238,8 @@ class StateStore:
             "updated_at = excluded.updated_at",
             (strategy_id, cursor, json.dumps(state), source_hash, _now()),
         )
-        self.db.commit()
+        if commit:
+            self.db.commit()
 
     def reset(self, strategy_id: str) -> None:
         self.db.execute("DELETE FROM strategy_state WHERE strategy_id = ?", (strategy_id,))
@@ -312,23 +341,25 @@ class StateStore:
 
     # ------------------------------------------------------------------ trades and events
 
-    def add_trade(self, strategy_id: str, trade: dict, run_id: int | None = None) -> None:
+    def add_trade(self, strategy_id: str, trade: dict, run_id: int | None = None, commit: bool = True) -> None:
         cols = ", ".join(["strategy_id", "run_id"] + TRADE_COLS)
         marks = ", ".join("?" * (len(TRADE_COLS) + 2))
         self.db.execute(
             f"INSERT INTO paper_trades ({cols}) VALUES ({marks})",
             [strategy_id, run_id] + [json.dumps(trade.get(c) or {}) if c in JSON_COLS else trade.get(c) for c in TRADE_COLS],
         )
-        self.db.commit()
+        if commit:
+            self.db.commit()
 
     def add_event(self, strategy_id: str, bar_time: str, kind: str, message: str, notified: bool,
-                  run_id: int | None = None) -> None:
+                  run_id: int | None = None, commit: bool = True) -> None:
         self.db.execute(
             "INSERT INTO events (strategy_id, run_id, bar_time, kind, message, notified, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (strategy_id, run_id, bar_time, kind, message, int(notified), _now()),
         )
-        self.db.commit()
+        if commit:
+            self.db.commit()
 
     def trades(self, strategy_id: str | None = None, run_id: int | None = None) -> list[dict]:
         q, args = "SELECT * FROM paper_trades WHERE 1=1", []
@@ -520,6 +551,96 @@ class StateStore:
         else:
             rows = self.db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,))
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------ notification delivery tracking
+
+    def add_delivery(self, *, strategy_id: str | None, run_id: int | None, channel: str, kind: str,
+                     title: str, body: str, priority: str, status: str, attempts: int,
+                     error: str | None, next_retry_at: str | None) -> int:
+        """One attempt to send one message on one channel. ``status`` is ``sent``, ``failed`` or
+        ``retrying``. Kept so Settings and the Activity page can show what was actually delivered."""
+        now = _now()
+        cur = self.db.execute(
+            "INSERT INTO deliveries (strategy_id, run_id, channel, kind, title, body, priority, status, "
+            "attempts, last_error, created_at, updated_at, next_retry_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (strategy_id, run_id, channel, kind, title, body, priority, status, attempts, error, now, now,
+             next_retry_at),
+        )
+        self.db.commit()
+        return cur.lastrowid
+
+    def due_deliveries(self, now_iso: str, limit: int = 200) -> list[dict]:
+        """Deliveries waiting on a retry whose backoff has passed, oldest first."""
+        rows = self.db.execute(
+            "SELECT * FROM deliveries WHERE status = 'retrying' AND (next_retry_at IS NULL OR next_retry_at <= ?) "
+            "ORDER BY id LIMIT ?", (now_iso, limit))
+        return [dict(r) for r in rows]
+
+    def update_delivery(self, delivery_id: int, *, status: str, attempts: int, error: str | None,
+                        next_retry_at: str | None) -> None:
+        self.db.execute(
+            "UPDATE deliveries SET status = ?, attempts = ?, last_error = ?, updated_at = ?, next_retry_at = ? "
+            "WHERE id = ?",
+            (status, attempts, error, _now(), next_retry_at, delivery_id),
+        )
+        self.db.commit()
+
+    def channel_delivery_status(self) -> dict[str, dict]:
+        """Per channel: when a message was last delivered, and last gave up after retries."""
+        rows = self.db.execute(
+            "SELECT channel, MAX(CASE WHEN status = 'sent' THEN updated_at END) AS last_sent, "
+            "MAX(CASE WHEN status = 'failed' THEN updated_at END) AS last_failed FROM deliveries GROUP BY channel"
+        )
+        return {r["channel"]: {"last_sent": r["last_sent"], "last_failed": r["last_failed"]} for r in rows}
+
+    # ------------------------------------------------------------------ background jobs
+
+    def save_job(self, job_id: str, owner: str, kind: str, status: str, created_at: str,
+                started_at: str | None = None, finished_at: str | None = None,
+                error: str | None = None, error_type: str | None = None) -> None:
+        self.db.execute(
+            "INSERT INTO jobs (id, owner, kind, status, created_at, started_at, finished_at, error, error_type) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
+            "status = excluded.status, started_at = excluded.started_at, finished_at = excluded.finished_at, "
+            "error = excluded.error, error_type = excluded.error_type",
+            (job_id, owner, kind, status, created_at, started_at, finished_at, error, error_type),
+        )
+        self.db.commit()
+
+    def jobs_for_owner(self, owner: str) -> list[dict]:
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM jobs WHERE owner = ? ORDER BY created_at DESC", (owner,))]
+
+    def job_counts(self) -> dict[str, int]:
+        out = {"queued": 0, "running": 0, "completed": 0, "failed": 0, "cancelled": 0}
+        for r in self.db.execute("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"):
+            out[r["status"]] = r["n"]
+        return out
+
+    def fail_stale_jobs(self, reason: str) -> int:
+        """At startup: a job still ``queued`` or ``running`` can only be left over from a
+        process that stopped without finishing it (a crash, a kill, a power cut)."""
+        now = _now()
+        cur = self.db.execute(
+            "UPDATE jobs SET status = 'failed', error = ?, error_type = 'Interrupted', finished_at = ? "
+            "WHERE status IN ('queued', 'running')",
+            (reason, now),
+        )
+        self.db.commit()
+        return cur.rowcount
+
+    # ------------------------------------------------------------------ database health
+
+    def quick_check(self) -> str | None:
+        """SQLite's fast consistency check. None when the database looks fine, otherwise
+        what's wrong (the first line, for a short message)."""
+        try:
+            rows = self.db.execute("PRAGMA quick_check").fetchall()
+        except sqlite3.DatabaseError as exc:
+            return str(exc)
+        text = rows[0][0] if rows else "ok"
+        return None if text == "ok" else text
 
     # ------------------------------------------------------------------ strategy versions
 

@@ -17,12 +17,13 @@ CATEGORIES = {
     "signals": ["signal"],
     "skipped": ["skipped"],
     "changes": ["strategy_saved", "settings_changed"],
-    "problems": ["alert_failed", "data_problem", "drawdown"],
+    "problems": ["alert_failed", "data_problem", "drawdown", "db_problem"],
 }
 EXTRA = {"price", "news"}  # categories that come from other tables
 KIND_TITLE = {"signal": "Rules met", "opened": "Trade opened", "closed": "Trade closed", "skipped": "Signal skipped",
               "strategy_saved": "Strategy saved", "alert_failed": "Alert not sent",
-              "data_problem": "Price data problem", "drawdown": "Drawdown limit hit", "near_level": "Near stop or target"}
+              "data_problem": "Price data problem", "drawdown": "Drawdown limit hit", "near_level": "Near stop or target",
+              "db_problem": "Database problem"}
 CATEGORY_OF = {kind: cat for cat, kinds in CATEGORIES.items() for kind in kinds}
 SEEN_KEY = "activity_seen"
 
@@ -35,7 +36,7 @@ def _event_item(e: dict, names: dict[str, str]) -> dict:
     kind, sid = e["kind"], e.get("strategy_id") or ""
     lines = (e.get("message") or "").split("\n")
     name = names.get(sid) or sid
-    if kind in ("strategy_saved", "settings_changed", "alert_failed"):
+    if kind in ("strategy_saved", "settings_changed", "alert_failed", "db_problem"):
         title, body = lines[0], "\n".join(lines[1:]).strip()
         if kind == "strategy_saved" and name:
             title = f"{name}: {title[0].lower()}{title[1:]}" if title else name

@@ -260,6 +260,14 @@ export async function viewSettings() {
       : opts.note ? h("span", { class: "small muted" }, opts.note) : null);
   const enabled = (obj, label) => h("label", { class: "check" }, h("input", { type: "checkbox", checked: obj.enabled,
     onchange: (e) => { obj.enabled = e.target.checked; } }), label);
+  const fmt = (iso) => iso ? new Date(iso).toLocaleString() : null;
+  const delivery = (obj) => {
+    if (!obj.last_sent && !obj.last_failed) return null;
+    const parts = [];
+    if (obj.last_sent) parts.push(`Last delivered ${fmt(obj.last_sent)}.`);
+    if (obj.last_failed) parts.push(`Last failed ${fmt(obj.last_failed)}.`);
+    return h("p", { class: "small muted" }, parts.join(" "));
+  };
 
   const minPoll = limits().min_poll_minutes || 1;
   const poll = h("select", { onchange: (e) => { s.poll_minutes = Number(e.target.value); } },
@@ -294,25 +302,25 @@ export async function viewSettings() {
         "secrets_store" in s ? h("p", { class: "section-note" }, s.secrets_store
           ? `Passwords, tokens and webhook addresses are kept in ${s.secrets_store}, not in config.yaml.`
           : "Passwords, tokens and webhook addresses are saved in config.yaml in the app's data folder.") : null,
-        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Phone (ntfy)"), h("p", { class: "small muted" }, "Install the ntfy app and subscribe to the same topic. On the public ntfy.sh server, pick a long random topic name.")),
+        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Phone (ntfy)"), h("p", { class: "small muted" }, "Install the ntfy app and subscribe to the same topic. On the public ntfy.sh server, pick a long random topic name."), delivery(n.ntfy)),
           h("div", { class: "stack" }, enabled(n.ntfy, "Send alerts with ntfy"), h("div", { class: "fields" },
             text(n.ntfy, "server", "Server", { placeholder: "https://ntfy.sh" }),
             text(n.ntfy, "topic", "Topic"),
             text(n.ntfy, "token", "Access token", { secret: true, note: n.ntfy.token_set ? "Saved. Leave blank to keep it" : "Only needed if your server requires one" })))),
-        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Discord"), h("p", { class: "small muted" }, "Create a webhook in your channel's settings.")),
+        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Discord"), h("p", { class: "small muted" }, "Create a webhook in your channel's settings."), delivery(n.discord)),
           h("div", { class: "stack" }, enabled(n.discord, "Send alerts to Discord"), h("div", { class: "fields" },
             text(n.discord, "webhook_url", "Webhook URL", { secret: true })))),
-        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Telegram"), h("p", { class: "small muted" }, "Make a bot with @BotFather and send it a message. Get your chat ID from @userinfobot.")),
+        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Telegram"), h("p", { class: "small muted" }, "Make a bot with @BotFather and send it a message. Get your chat ID from @userinfobot."), delivery(n.telegram)),
           h("div", { class: "stack" }, enabled(n.telegram, "Send alerts to Telegram"), h("div", { class: "fields" },
             text(n.telegram, "token", "Bot token", { secret: true, note: n.telegram.token_set ? "Saved. Leave blank to keep it" : "" }),
             text(n.telegram, "chat_id", "Chat ID")))),
-        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Slack"), h("p", { class: "small muted" }, "Add an incoming webhook to your Slack app. Mattermost webhooks work too.")),
+        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Slack"), h("p", { class: "small muted" }, "Add an incoming webhook to your Slack app. Mattermost webhooks work too."), delivery(n.slack)),
           h("div", { class: "stack" }, enabled(n.slack, "Send alerts to Slack"), h("div", { class: "fields" },
             text(n.slack, "webhook_url", "Webhook URL", { secret: true })))),
-        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Webhook"), h("p", { class: "small muted" }, "Sends title, body, priority and tags as JSON.")),
+        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Webhook"), h("p", { class: "small muted" }, "Sends title, body, priority and tags as JSON."), delivery(n.webhook)),
           h("div", { class: "stack" }, enabled(n.webhook, "Send alerts to a webhook"), h("div", { class: "fields" },
             text(n.webhook, "url", "URL")))),
-        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Email"), h("p", { class: "small muted" }, "Through your own email account's SMTP server. Gmail and Outlook need an app password; Proton Mail needs Proton Bridge.")),
+        h("div", { class: "channel" }, h("div", {}, h("h3", {}, "Email"), h("p", { class: "small muted" }, "Through your own email account's SMTP server. Gmail and Outlook need an app password; Proton Mail needs Proton Bridge."), delivery(n.email)),
           h("div", { class: "stack" }, enabled(n.email, "Send alerts and reports by email"), h("div", { class: "fields" },
             text(n.email, "host", "SMTP server", { placeholder: "smtp.gmail.com" }),
             text(n.email, "port", "Port", { placeholder: "587" }),

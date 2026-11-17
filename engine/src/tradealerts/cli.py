@@ -7,6 +7,7 @@ import logging
 import sys
 from importlib import resources
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pandas as pd
 
@@ -316,6 +317,47 @@ def cmd_sample_data(args) -> int:
     return 0
 
 
+def cmd_check_db(args) -> int:
+    cfg = load_config(args.config)
+    if not cfg.state_db.exists():
+        print("No database yet.")
+        return 0
+    store = StateStore(cfg.state_db)
+    try:
+        problem = store.quick_check()
+    finally:
+        store.close()
+    if problem:
+        print(f"✗ {problem}")
+        print("Restore from a backup in Settings, or ask for help before writing anything else to it.")
+        return 1
+    print("✓ state.db passes its integrity check")
+    return 0
+
+
+def cmd_verify_backup(args) -> int:
+    from fastapi import HTTPException
+
+    from .web.routes.backup import read_backup
+    from .workspace import Workspace
+
+    ws = Workspace(Path(args.config or "config.yaml"))
+    raw = Path(args.file).read_bytes()
+    with TemporaryDirectory() as tmp:
+        try:
+            out = read_backup(ws, raw, Path(tmp))
+        except HTTPException as exc:
+            print(f"✗ {exc.detail}")
+            return 1
+    parts = [f"{len(out['strategies'])} strategy file(s)"]
+    if out["settings"] is not None:
+        parts.append("settings")
+    if out["db"]:
+        parts.append("a database")
+    print(f"✓ {args.file} reads back fine: {', '.join(parts)}")
+    return 0
+
+
 # --------------------------------------------------------------------------- parser
 
 
@@ -396,6 +438,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--from", dest="start", help="start date, e.g. 2025-01-01")
     s.add_argument("--to", dest="end", help="end date (exclusive)")
     s.set_defaults(func=cmd_check_data)
+
+    s = sub.add_parser("check-db", help="check state.db's integrity")
+    s.set_defaults(func=cmd_check_db)
+
+    s = sub.add_parser("verify-backup", help="check a backup zip reads back cleanly")
+    s.add_argument("file")
+    s.set_defaults(func=cmd_verify_backup)
     return p
 
 

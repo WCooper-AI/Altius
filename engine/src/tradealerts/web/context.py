@@ -51,7 +51,8 @@ class SelfHostContext(AppContext):
     """One workspace, optionally behind one password."""
 
     def __init__(self, ws: Workspace, auth, runner=None, desktop: bool = False):
-        super().__init__(runner=runner, desktop=desktop)
+        jobs = InlineJobs(store_factory=lambda: ws.store(create=False))
+        super().__init__(runner=runner, jobs=jobs, desktop=desktop)
         self.ws = ws
         self.auth = auth
 

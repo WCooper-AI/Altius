@@ -12,7 +12,7 @@ import pandas as pd
 from . import data as data_mod
 from . import fxrates, timeframes, versions, watch
 from .config import AppConfig
-from .notify import Message, Notifier, broadcast
+from .notify import Message, Notifier, record_deliveries, retry_pending, send_each
 from .backtest import fine_lookup, spreads_for
 from .simulator import Event, Simulator, new_state
 from .state import StateStore
@@ -204,27 +204,33 @@ def process_strategy(
     all_events: list[Event] = []
     for i in new_pos:
         t = df.index[i]
+        pending_deliveries = []  # [(outcomes, kind, msg)], recorded once this bar is safely saved
         for ev in sim.step(t, o[i], h[i], l[i], c[i], bool(prepared.entry[i]),
                            bool(prepared.exit[i]), prepared.refs_at(i),
                            spread=None if spreads is None else spreads[i], fine=lambda t=t: get_fine(t),
                            values=prepared.values_at(i), fx=None if fx is None else fx[i]):
             all_events.append(ev)
             if ev.kind == "closed":
-                store.add_trade(strategy.id, ev.data, run["id"])
+                store.add_trade(strategy.id, ev.data, run["id"], commit=False)
             msg = format_event(strategy, ev, fresh=(i == last))
             notified = False
-            errors = []
             if msg and send:
-                errors = broadcast(notifiers, msg)
-                notified = not errors
-            store.add_event(strategy.id, str(t), ev.kind, msg.body if msg else "", notified, run["id"])
-            if errors:
-                store.add_event(strategy.id, str(t), "alert_failed",
-                                f"Alert not sent: {msg.title}\n" + "; ".join(errors), False, run["id"])
+                outcomes = send_each(notifiers, msg)
+                notified = all(error is None for _, error in outcomes)
+                pending_deliveries.append((outcomes, ev.kind, msg))
+            store.add_event(strategy.id, str(t), ev.kind, msg.body if msg else "", notified, run["id"], commit=False)
         store.add_equity(run["id"], str(t + tf), sim.state["equity"] + sim.unrealised(c[i]))
-    sim.state["mark"] = {"time": str(df.index[last] + tf), "close": float(c[last])}
-    store.commit()
-    store.save(strategy.id, str(df.index[-1]), sim.state, strategy.source_hash)
+        sim.state["mark"] = {"time": str(t + tf), "close": float(c[i])}
+        # One bar's trades, events, equity point and advanced cursor land together: a crash
+        # partway through a multi-bar catch-up can only lose a bar that hadn't finished yet,
+        # never replay one whose trade or alert was already sent.
+        store.save(strategy.id, str(t), sim.state, strategy.source_hash, commit=False)
+        store.commit()
+        # Delivery bookkeeping (for retries) is saved only now, after the bar it belongs to
+        # is durable, and is never relied on to decide whether a bar gets reprocessed.
+        for outcomes, kind, msg in pending_deliveries:
+            record_deliveries(store, outcomes, strategy_id=strategy.id, run_id=run["id"], kind=kind,
+                              title=msg.title, body=msg.body, priority=msg.priority, now=t)
     rep = cfg.report or {}
     try:
         watch.check_drawdown(store, strategy, run, sim.state["equity"] + sim.unrealised(c[last]), now,
@@ -268,6 +274,13 @@ def run_cycle(cfg: AppConfig, store: StateStore, notifiers: list[Notifier],
         check_price_alerts(cfg, store, notifiers, now, loader=price_loader or load_recent)
     except Exception as exc:
         log.exception("Price alerts check failed: %s", exc)
+    try:
+        for row in retry_pending(store, notifiers, now):
+            store.add_event(row.get("strategy_id") or "", str(_utc(now)), "alert_failed",
+                            f"Alert not sent after {row['attempts']} tries: {row['title']}\n"
+                            f"{row['channel']}: {row['error']}", False, row.get("run_id"))
+    except Exception as exc:
+        log.exception("Notification retry check failed: %s", exc)
     return results
 
 

@@ -94,6 +94,7 @@ job runs per workspace at a time.
 | `POST /api/runs/{run_id}/backtest-range` | The live-versus-backtest usual range |
 | `GET /api/status`, `POST /api/run-now` | The live checker's state; check now |
 | `GET /api/activity`, `POST /api/activity/seen`, `GET /api/paper` | The activity timeline, mark as seen, paper trades |
+| `GET /api/health` | A short machine-readable check for monitoring: database ok, when the checker last ran, job counts, last backup |
 
 ### Markets, alerts, news, journal
 

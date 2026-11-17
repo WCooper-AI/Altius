@@ -116,7 +116,14 @@ def make_backup(ws: Workspace, redact: bool = False) -> bytes:
 def backup(redact: bool = False, ws: Workspace = Depends(workspace)):
     kind = "shareable-backup" if redact else "backup"
     name = f"trading-alerts-{kind}-{pd.Timestamp.now():%Y-%m-%d}.zip"
-    return Response(make_backup(ws, redact=redact), media_type="application/zip",
+    data = make_backup(ws, redact=redact)
+    ok, problem = verify_backup(ws, data)
+    if ok:
+        with ws.store() as store:
+            store.set_value("last_backup_at", pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds"))
+    else:
+        log.warning("A backup was made but didn't read back cleanly: %s", problem)
+    return Response(data, media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
@@ -245,6 +252,18 @@ def read_backup(ws: Workspace, raw: bytes, tmp: Path) -> dict:
     if limit is not None and len(out["strategies"]) > limit:
         err(422, f"The backup has {len(out['strategies'])} strategies; this plan allows {limit}.")
     return out
+
+
+def verify_backup(ws: Workspace, raw: bytes) -> tuple[bool, str | None]:
+    """Read a backup back the way a restore would, without changing anything: (ok, problem).
+    Used right after a backup is made (so Settings and ``GET /api/health`` can show when one
+    last worked) and by ``tradealerts verify-backup``."""
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            read_backup(ws, raw, Path(tmp))
+        except HTTPException as exc:
+            return False, str(exc.detail)
+    return True, None
 
 
 def _snapshot(ws: Workspace) -> dict:
