@@ -15,6 +15,7 @@ wrong if it failed.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import secrets
 import threading
@@ -25,6 +26,7 @@ from typing import Any, Callable
 log = logging.getLogger(__name__)
 
 KEEP_SECONDS = 900  # how long a finished job's result stays available
+_ORDER = itertools.count()  # breaks ties when two jobs share a clock tick (coarse clock on Windows)
 
 
 class Busy(RuntimeError):
@@ -79,6 +81,7 @@ class _Job:
         self.error: str | None = None
         self.error_type: str | None = None
         self.created = time.time()
+        self.order = next(_ORDER)  # breaks ties when two jobs share a clock tick (coarse clock on Windows)
         self.finished: float | None = None
         self.timed_out: float | None = None  # the limit in seconds, when the watchdog stopped it
         self.future = None
@@ -146,7 +149,7 @@ class _JobTable:
         """This owner's jobs, newest first, without their results."""
         with self._jobs_lock:
             mine = [j for j in self._jobs.values() if j.owner == (owner or "-")]
-        return [j.public(result=False) for j in sorted(mine, key=lambda j: j.created, reverse=True)]
+        return [j.public(result=False) for j in sorted(mine, key=lambda j: (j.created, j.order), reverse=True)]
 
     def cancel(self, owner: str | None, job_id: str) -> bool:
         j = self._get(owner, job_id)
