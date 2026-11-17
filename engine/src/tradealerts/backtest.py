@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from . import fxrates, limits, measures, timeframes
+from .contracts import BacktestMetrics
 from .data import find_jumps
 from .markethours import trades_24_7
 from .simulator import Event, Simulator
@@ -19,14 +20,14 @@ class BacktestResult:
     strategy: Strategy
     trades: pd.DataFrame
     equity: pd.Series
-    metrics: dict
+    metrics: BacktestMetrics
     skipped: list[Event] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     # With a train/test split: trades, equity and metrics above are the in-sample part,
     # these the out-of-sample part (a fresh account from ``split_date``).
     oos_trades: pd.DataFrame | None = None
     oos_equity: pd.Series | None = None
-    oos_metrics: dict | None = None
+    oos_metrics: BacktestMetrics | None = None
     split_date: pd.Timestamp | None = None
 
 
@@ -189,7 +190,7 @@ def run_backtest(strategy: Strategy, df: pd.DataFrame, fine: pd.DataFrame | None
     return BacktestResult(strategy, trades_df, eq, metrics, skipped, all_notes, **split)
 
 
-def compute_metrics(strategy: Strategy, trades: pd.DataFrame, equity: pd.Series, df: pd.DataFrame, bars_in_market: int) -> dict:
+def compute_metrics(strategy: Strategy, trades: pd.DataFrame, equity: pd.Series, df: pd.DataFrame, bars_in_market: int) -> BacktestMetrics:
     start_eq = strategy.risk.account_size
     peak = equity.cummax().clip(lower=start_eq)
     dd = (equity / peak - 1) * 100

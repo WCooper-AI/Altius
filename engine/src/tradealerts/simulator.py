@@ -51,6 +51,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from . import limits, timeframes
+from .contracts import TradeRecord
 from .risk import position_size
 from .strategy import SkipTrade, Strategy
 
@@ -241,7 +242,7 @@ class Simulator:
         self.state["position"] = None
         self.state["pending_exit"] = False
         self.state["trades"] += 1
-        trade = {
+        trade: TradeRecord = {
             "direction": s.direction,
             "signal_time": p["signal_time"],
             "entry_time": p["entry_time"],

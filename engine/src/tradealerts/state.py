@@ -7,6 +7,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .contracts import DeliveryRecord, JobRecord, RunRecord
+
 # Wrong sign-in passwords per address, so a restart doesn't reset the slow-down (see web.auth).
 LOGIN_ATTEMPTS = """
 CREATE TABLE IF NOT EXISTS login_attempts (
@@ -253,20 +255,20 @@ class StateStore:
 
     # ------------------------------------------------------------------ forward-test runs
 
-    def active_run(self, strategy_id: str) -> dict | None:
+    def active_run(self, strategy_id: str) -> RunRecord | None:
         row = self.db.execute(
             "SELECT * FROM runs WHERE strategy_id = ? AND stopped_at IS NULL ORDER BY id DESC LIMIT 1",
             (strategy_id,),
         ).fetchone()
         return dict(row) if row else None
 
-    def active_runs(self) -> dict[str, dict]:
+    def active_runs(self) -> dict[str, RunRecord]:
         return {r["strategy_id"]: dict(r) for r in self.db.execute(
             "SELECT * FROM runs WHERE stopped_at IS NULL ORDER BY id")}
 
     def start_run(self, strategy_id: str, *, name: str, market: str, timeframe: str, currency: str,
                   start_balance: float, started_at: str | None = None, keep_state: bool = False,
-                  source_hash: str = "", strategy_yaml: str = "", if_none: bool = False) -> dict:
+                  source_hash: str = "", strategy_yaml: str = "", if_none: bool = False) -> RunRecord:
         """Start a new forward test. Any running one for the strategy is finished first,
         unless ``if_none`` is true, in which case an existing active run is returned as-is.
 
@@ -298,7 +300,7 @@ class StateStore:
             raise
         return self.run(cur.lastrowid)
 
-    def stop_run(self, strategy_id: str, stopped_at: str | None = None) -> dict | None:
+    def stop_run(self, strategy_id: str, stopped_at: str | None = None) -> RunRecord | None:
         run = self.active_run(strategy_id)
         if not run:
             return None
@@ -312,11 +314,11 @@ class StateStore:
                         (source_hash, strategy_yaml, run_id))
         self.db.commit()
 
-    def run(self, run_id: int) -> dict | None:
+    def run(self, run_id: int) -> RunRecord | None:
         row = self.db.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
         return dict(row) if row else None
 
-    def runs(self) -> list[dict]:
+    def runs(self) -> list[RunRecord]:
         return [dict(r) for r in self.db.execute("SELECT * FROM runs ORDER BY id DESC")]
 
     def delete_run(self, run_id: int) -> None:
@@ -570,7 +572,7 @@ class StateStore:
         self.db.commit()
         return cur.lastrowid
 
-    def due_deliveries(self, now_iso: str, limit: int = 200) -> list[dict]:
+    def due_deliveries(self, now_iso: str, limit: int = 200) -> list[DeliveryRecord]:
         """Deliveries waiting on a retry whose backoff has passed, oldest first."""
         rows = self.db.execute(
             "SELECT * FROM deliveries WHERE status = 'retrying' AND (next_retry_at IS NULL OR next_retry_at <= ?) "
@@ -608,7 +610,7 @@ class StateStore:
         )
         self.db.commit()
 
-    def jobs_for_owner(self, owner: str) -> list[dict]:
+    def jobs_for_owner(self, owner: str) -> list[JobRecord]:
         return [dict(r) for r in self.db.execute(
             "SELECT * FROM jobs WHERE owner = ? ORDER BY created_at DESC", (owner,))]
 
