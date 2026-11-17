@@ -108,12 +108,12 @@ def test_wording_is_factual_only():
     out = analysis.trade_window_ranges(fake_trades(80), fake_trades(5, win=0.0), 1000, samples=50)
     text = " ".join(str(v) for v in [out["notice"], out.get("reason")] + [m["position"] for m in out["metrics"].values()])
     assert not FORBIDDEN.search(text)
-    js = (STATIC / "dashboard.js").read_text()
+    js = (STATIC / "dashboard.js").read_text(encoding="utf-8")
     body = js[js.index("const WINDOW_ROWS"):js.index("function paperPrefill")]
     assert not FORBIDDEN.search(body)
     assert "below the usual range" in body and "within the usual range" in body and "above the usual range" in body
     assert "Log real trade" in js and "paperPrefill(r, t)" in js
-    journal = (STATIC / "journal.js").read_text()
+    journal = (STATIC / "journal.js").read_text(encoding="utf-8")
     assert "prefill = null" in journal and "paper_trade_id" in journal
 
 
