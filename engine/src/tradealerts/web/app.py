@@ -169,6 +169,7 @@ NO_PASSWORD_BEHIND_PROXY = (
     "reachable from the internet. Set TRADEALERTS_PASSWORD and restart, or pass --no-auth if the proxy "
     "already checks who signs in.")
 
+
 def _startup_checks(ws: Workspace) -> None:
     """Run once when the server starts: catch a damaged database early (rather than at some
     unrelated request later), and close out any background job that was still going when
