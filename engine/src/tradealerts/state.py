@@ -301,6 +301,7 @@ class StateStore:
             "INSERT OR REPLACE INTO run_equity (run_id, bar_time, equity) VALUES (?, ?, ?)",
             (run_id, bar_time, equity),
         )
+        self.db.commit()
 
     def equity(self, run_id: int) -> list[tuple[str, float]]:
         return [(r["bar_time"], r["equity"]) for r in self.db.execute(

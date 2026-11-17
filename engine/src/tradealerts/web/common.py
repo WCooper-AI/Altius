@@ -239,13 +239,13 @@ def raw_from_settings(raw: dict, settings: dict, ws: Workspace | None = None) ->
     daily_hour = rep.get("daily_hour", 18)
     if isinstance(daily_hour, bool) or not isinstance(daily_hour, int) or not 0 <= daily_hour <= 23:
         err(422, "The daily summary hour must be between 0 and 23")
-    dd = number(rep, "drawdown_pct", "drawdown limit", required=False, exclusive=False)
-    near = number(rep, "near_pct", "near-level distance", required=False, exclusive=False)
+    dd = number(rep, "drawdown_pct", "drawdown limit", required=False, exclusive=False) or 0
+    near = number(rep, "near_pct", "near-level distance", required=False, exclusive=False) or 0
     if dd >= 100 or near >= 100:
         err(422, "Drawdown limit and near-level distance must be below 100%")
     out["report"] = {"weekly": bool(rep.get("weekly")), "day": rep["day"], "hour": hour,
                      "daily": bool(rep.get("daily")), "daily_hour": daily_hour,
-                     "drawdown_pct": dd or 0, "near_pct": near or 0}
+                     "drawdown_pct": dd, "near_pct": near}
     if tz:
         out["report"]["tz"] = tz
     out["data"] = {"source": source, "oanda_environment": env}
