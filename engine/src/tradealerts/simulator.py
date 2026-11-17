@@ -8,7 +8,9 @@ How trades are filled, modelled on a CFD/spread-bet broker:
 * Signals are read on a candle's *close*; entries fill at the **next candle's open**.
 * Stop and target levels are the price you'd actually get: a long's stop or
   target is hit when the *bid* reaches it, a short's when the *ask* does. A
-  candle that opens beyond the stop fills at that open (gap risk).
+  candle that opens beyond the stop fills at that open (gap risk). That includes
+  the entry candle: a stop closer than the spread (plus entry slippage) is already
+  passed at the fill, so the trade is out straight away at the bid (long) or ask (short).
 * If a stop and target both fall inside one candle, finer candles (e.g. 1h inside
   4h) decide which came first. With no finer data the stop is assumed first.
 * An exit rule (``exit.when``) closes at the next candle's open; ``max_bars``
@@ -272,7 +274,7 @@ class Simulator:
         }
         return Event("closed", time, trade)
 
-    def _levels(self, p: dict, o: float, h: float, l: float, hs: float, allow_gap: bool):
+    def _levels(self, p: dict, o: float, h: float, l: float, hs: float):
         """Which of stop/target this candle reaches, at the side of the book we'd exit on.
 
         Returns (reason, price) for a gap through a level at the open, otherwise
@@ -281,20 +283,22 @@ class Simulator:
         sign, stop, target = self.s.sign, p["stop"], p["target"]
         if sign > 0:  # long exits at the bid
             bo, bh, bl = o - hs, h - hs, l - hs
-            if allow_gap and bo <= stop:
+            if bo <= stop:
                 return ("stop", bo)
-            if allow_gap and target is not None and bo >= target:
+            if target is not None and bo >= target:
                 return ("target", bo)
             return ("hits", bl <= stop, target is not None and bh >= target)
         ao, ah, al = o + hs, h + hs, l + hs  # short exits at the ask
-        if allow_gap and ao >= stop:
+        if ao >= stop:
             return ("stop", ao)
-        if allow_gap and target is not None and ao <= target:
+        if target is not None and ao <= target:
             return ("target", ao)
         return ("hits", ah >= stop, target is not None and al <= target)
 
-    def _resolve_exit(self, p, o, h, l, hs, opened_now, fine: Callable[[], Any] | None):
-        res = self._levels(p, o, h, l, hs, allow_gap=not opened_now)
+    def _resolve_exit(self, p, o, h, l, hs, fine: Callable[[], Any] | None):
+        # On the entry candle the open is the fill, so a target can't be past it there, but a
+        # stop inside the spread can: that's an exit at the open, like any gap through the stop.
+        res = self._levels(p, o, h, l, hs)
         if res[0] != "hits":
             return res
         _, stop_hit, target_hit = res
@@ -307,8 +311,8 @@ class Simulator:
         # Both inside one candle: look at the finer candles to see which came first.
         rows = fine() if fine else None
         if rows is not None and len(rows):
-            for k, r in enumerate(rows.itertuples(index=False)):
-                sub = self._levels(p, r.open, r.high, r.low, hs, allow_gap=not (opened_now and k == 0))
+            for r in rows.itertuples(index=False):
+                sub = self._levels(p, r.open, r.high, r.low, hs)
                 if sub[0] != "hits":
                     return sub
                 if sub[1]:
@@ -317,14 +321,14 @@ class Simulator:
                     return ("target", p["target"])
         return ("stop", p["stop"])
 
-    def _exit_hit(self, p, o, h, l, hs, opened_now, fine):
+    def _exit_hit(self, p, o, h, l, hs, fine):
         """Stop, target or close-out inside this candle, as (reason, price), or None."""
         sign, level = self.s.sign, self._close_out_level(p)
         if level is None or (level - p["stop"]) * sign <= 0:  # the stop comes first, or no close-out
-            return self._resolve_exit(p, o, h, l, hs, opened_now, fine)
+            return self._resolve_exit(p, o, h, l, hs, fine)
         if (level - (o - sign * hs)) * sign >= 0:  # already past it when the candle opens
             return ("close_out", o - sign * hs)
-        hit = self._resolve_exit({**p, "stop": level}, o, h, l, hs, opened_now, fine)
+        hit = self._resolve_exit({**p, "stop": level}, o, h, l, hs, fine)
         return ("close_out", hit[1]) if hit and hit[0] == "stop" else hit
 
     def _open(self, time, pend, fill, stop, target, size, hs, slip, margin, events) -> None:
@@ -420,8 +424,7 @@ class Simulator:
         p = st["position"]
         if p:
             self._excursion(p, h, l, hs)
-            opened_now = p["entry_time"] == str(time)
-            hit = self._exit_hit(p, o, h, l, hs, opened_now, fine)
+            hit = self._exit_hit(p, o, h, l, hs, fine)
             if hit:
                 events.append(self._close(time, hit[1], hit[0], hs))
 

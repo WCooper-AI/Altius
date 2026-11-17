@@ -14,14 +14,17 @@ forecast.
    otherwise the strategy's spread setting.
 3. Stops and targets trigger at the prices you would get: a long position's stop or target
    when the **bid** reaches it, a short's when the **ask** does. A candle that opens beyond the
-   stop fills at that open (gap risk).
+   stop fills at that open (gap risk), and one that opens beyond the target fills at that
+   better open (a target is a limit order). A stop closer than the spread is already passed
+   when the trade fills, so the trade closes straight away at the bid (long) or ask (short).
 4. If a stop and a target both fall inside one candle, **finer candles** (for example 1-hour
-   inside 4-hour or daily) decide which came first. Without finer data the stop is assumed
-   first.
+   inside 4-hour or daily) decide which came first, at a finer candle's open if it opened
+   beyond the level. Without finer data the stop is assumed first.
 5. An exit rule closes at the next open; "close after N candles" closes at the Nth candle's
    close. One position per strategy at a time.
 6. 4-hour and daily candles start at **17:00 New York** by default, like most CFD and FX
-   broker charts (`market.candle_alignment: utc` changes this).
+   broker charts (`market.candle_alignment: utc` changes this). They keep that hour through
+   the clock changes, so the daily candle that spans one is 23 or 25 hours long, as on those charts.
 
 ## Costs
 

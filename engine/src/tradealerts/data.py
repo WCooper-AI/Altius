@@ -118,14 +118,21 @@ def resample_ohlcv(df: pd.DataFrame, timeframe: str, alignment: str = DEFAULT_AL
     tz, start_hour = ALIGNMENTS.get(alignment, ALIGNMENTS[DEFAULT_ALIGNMENT])
     hours = target / pd.Timedelta(hours=1)
     if hours > 1 and tz != "UTC":
-        local = df.tz_convert(tz)
+        # Bin on the local wall clock (time zone dropped), so candles start at the same local
+        # hour all year. Binning in real time would slip an hour at each clock change and, for
+        # daily candles, leave a one-hour stub candle every weekend for half the year.
+        local = df.tz_convert(tz).tz_localize(None)
         if target >= pd.Timedelta(days=1):
             offset = pd.Timedelta(hours=start_hour)
         else:
             offset = pd.Timedelta(hours=start_hour % hours)
         rule = f"{int(round(hours))}h"  # fixed-length hours, so the offset applies to daily candles too
         out = local.resample(rule, label="left", closed="left", origin="start_day", offset=offset).agg(agg)
-        out = out.tz_convert("UTC")
+        out = out.dropna(subset=["open", "high", "low", "close"])
+        # a start the clocks skip moves to the first real time after it; a start the clocks repeat
+        # (autumn) is the first of the two, as the candle holds both
+        out.index = out.index.tz_localize(tz, ambiguous=np.ones(len(out), dtype=bool),
+                                          nonexistent="shift_forward").tz_convert("UTC")
     else:
         out = df.resample(timeframes.to_pandas_rule(timeframe), label="left", closed="left",
                           origin="start_day").agg(agg)
@@ -140,7 +147,17 @@ def closed_bars(df: pd.DataFrame, timeframe: str, now: pd.Timestamp | None = Non
     if now.tzinfo is None:
         now = now.tz_localize("UTC")
     length = timeframes.to_timedelta(timeframe)
-    return df[df.index + length <= now]
+    end = df.index + length
+    if length > pd.Timedelta(hours=1) and len(df) and df.index.tz is not None:
+        # Candles that start at a fixed New York hour (the default alignment, and OANDA's) run
+        # 25 hours across the autumn clock change, so they can't count as finished after the
+        # usual length. Take the later of the two ends: never early, at most an hour late.
+        tz = ALIGNMENTS[DEFAULT_ALIGNMENT][0]
+        wall = (df.index.tz_convert(tz).tz_localize(None) + length).tz_localize(
+            tz, ambiguous=np.zeros(len(df), dtype=bool), nonexistent="shift_forward")
+        later = np.maximum(end.tz_convert("UTC").as_unit("ns").asi8, wall.tz_convert("UTC").as_unit("ns").asi8)
+        return df[later <= now.value]
+    return df[end <= now]
 
 
 def find_jumps(df: pd.DataFrame, timeframe: str, threshold_atr: float = 4.0) -> pd.DataFrame:

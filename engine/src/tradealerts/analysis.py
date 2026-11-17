@@ -224,7 +224,8 @@ def portfolio(parts: list[tuple[str, str, BacktestResult]], balance: float,
         if len(t):
             pv = res.strategy.risk.point_value
             for row in t.itertuples():
-                amount = abs(row.entry_price - row.stop) * row.size * pv * scale[sid]
+                fx_in = _num_or(getattr(row, "fx_entry", None), 1.0)  # market money into account money
+                amount = abs(row.entry_price - row.stop) * row.size * pv * fx_in * scale[sid]
                 risk_events.append((pd.Timestamp(row.entry_time), amount, sid))
                 risk_events.append((pd.Timestamp(row.exit_time), -amount, sid))
                 open_events.append((pd.Timestamp(row.entry_time), 1, sid))
@@ -368,7 +369,8 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
     (``max_daily_loss_pct`` / ``max_weekly_loss_pct`` / ``max_drawdown_pct``, days and weeks in
     UTC, see :mod:`limits`), or when the margin held by open trades would pass ``max_margin_pct``
     of the balance. Each trade's result and margin scale with its new size against the backtest's
-    size; a trade the backtest sized at 0 stays at 0. Sizes use the exchange rate the trade
+    size; a trade the backtest sized at 0 stays at 0. A flat commission (``costs.commission``, a set
+    amount per fill) stays the same whatever the size. Sizes use the exchange rate the trade
     opened at (``fx_entry``) for markets priced in another currency.
     """
     from . import limits
@@ -379,10 +381,11 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
     rows = []
     for sid, name, res in parts:
         r = res.strategy.risk
+        flat = 2 * float(res.strategy.commission or 0.0)  # charged on the entry and on the exit fill
         for row in res.trades.itertuples():
             rows.append({"sid": sid, "entry": pd.Timestamp(row.entry_time), "exit": pd.Timestamp(row.exit_time),
                          "entry_price": float(row.entry_price), "stop": float(row.stop), "size": float(row.size),
-                         "pnl": float(row.pnl), "risk_pct": r.risk_per_trade_pct * scale[sid], "risk": r,
+                         "pnl": float(row.pnl), "flat": flat, "risk_pct": r.risk_per_trade_pct * scale[sid], "risk": r,
                          "fx_entry": _num_or(getattr(row, "fx_entry", None), 1.0),
                          "margin": _num_or(getattr(row, "margin", None), 0.0)})
     rows.sort(key=lambda x: (x["entry"], x["exit"]))
@@ -446,7 +449,8 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
             p["skipped"] += 1
             skipped["open_risk"] += 1
             continue
-        pnl = tr["pnl"] * size / tr["size"] if tr["size"] > 0 else 0.0
+        # the price move and every cost but the flat commission grow with the size
+        pnl = (tr["pnl"] + tr["flat"]) * size / tr["size"] - tr["flat"] if tr["size"] > 0 else 0.0
         if margin and equity > 0:
             peak_margin = max(peak_margin, open_margin / equity * 100)
         open_.append({**tr, "size": size, "pnl": pnl, "risk_amount": risk_amount, "margin": margin})
