@@ -62,6 +62,9 @@ export function when(iso) {
 }
 export function day(iso) { return iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "–"; }
 export const CURRENCY = { GBP: "£", USD: "$", EUR: "€" };
+/** Shown wherever paper (forward-test) results are: they are simulated fills. */
+export const PAPER_NOTE = "Paper trading is a simulation: trades are recorded at the prices the app sees. " +
+  "Real orders can fill differently because of liquidity, partial fills, requotes and spreads that change.";
 
 /** What kind of evidence a result is: past prices, checks on those prices, or prices that came later. */
 const STAGES = {

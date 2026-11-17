@@ -1,7 +1,7 @@
 /* Trading Alerts web interface: The dashboard and each forward test's page.
    ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
 
-import { $main, app, append, ask, attempt, clear, day, DEL, GET, h, money, num, POST, signed, stageTag, toast, when } from "./util.js";
+import { $main, app, append, ask, attempt, clear, day, DEL, GET, h, money, num, PAPER_NOTE, POST, signed, stageTag, toast, when } from "./util.js";
 import { checksText, doingText, hhmm, marketText, positionText, reopenText, signedMoney, stateBadge, stateLine,
   statusOf } from "./describe.js";
 import { choiceSelect } from "./editor.js";
@@ -307,7 +307,7 @@ export async function viewDashboard() {
       dash.running.map((r) => runCard(r, viewDashboard, { chartHeight: n === 1 ? 170 : few ? 130 : 96 })));
     // With only a card or two there's a lot of empty space, so fill it with what's coming up.
     if (few || n % 3) grid.appendChild(comingUp(dash, newsRes));
-    append(page, [grid]);
+    append(page, [grid, h("p", { class: "small muted paper-note" }, PAPER_NOTE)]);
   } else {
     append(page, [h("div", { class: "panel" }, h("div", { class: "empty" }, h("h2", {}, "No forward tests running"),
       h("p", { class: "muted" }, startable.length
@@ -342,7 +342,7 @@ export async function viewDashboard() {
           h("td", { class: "num" }, h("button", { type: "button", class: "quiet", onclick: (ev) => {
             const tr = ev.target.closest("tr");
             undoable("Forward test removed from the history", (on) => { tr.hidden = on; }, async () => { await DEL("/runs/" + r.id); });
-          } }, "Remove")))))))))]);
+          } }, "Remove"))))))), n ? null : h("p", { class: "small muted paper-note" }, PAPER_NOTE)))]);
   }
   clear($main).appendChild(page);
 }
@@ -536,7 +536,8 @@ export async function viewRun(id) {
             h("td", { class: "num " + (t.pnl >= 0 ? "gain" : "loss") }, signedMoney(t.pnl, sym)),
             h("td", { class: "num" }, h("button", { type: "button", class: "quiet", title: "Add the trade you placed on this alert to the journal, linked to this paper trade",
               onclick: () => journalDialog(null, () => { location.hash = "#/journal"; }, paperPrefill(r, t)) }, "Log real trade")))))))
-          : h("p", { class: "muted" }, r.position ? "A trade is open. It will appear here once it closes." : "No trades yet. They appear here as the rules are met.")))));
+          : h("p", { class: "muted" }, r.position ? "A trade is open. It will appear here once it closes." : "No trades yet. They appear here as the rules are met."),
+        h("p", { class: "small muted paper-note" }, PAPER_NOTE)))));
   if (r.active && r.strategy_exists) page.appendChild(liveStrategyChart(r.strategy_id, r.market));
   clear($main).appendChild(page);
 }

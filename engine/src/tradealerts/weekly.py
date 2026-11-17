@@ -17,6 +17,8 @@ from .state import StateStore
 
 SYM = {"GBP": "£", "USD": "$", "EUR": "€"}
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+PAPER_NOTE = ("Paper trading is a simulation: real orders can fill differently "
+              "(liquidity, partial fills, requotes, spreads that change).")
 
 
 def _utc(t) -> pd.Timestamp:
@@ -95,7 +97,7 @@ def as_text(r: dict) -> str:
         lines += ["", "High-impact news this coming week:"]
         for e in r["news"][:8]:
             lines.append(f"- {pd.Timestamp(e['time']):%a %d %b %H:%M} UTC  {e['currency']}  {e['title']}")
-    lines += ["", "Paper trading results from your own rules. Not financial advice."]
+    lines += ["", "Paper trading results from your own rules. Not financial advice.", PAPER_NOTE]
     return "\n".join(lines)
 
 
@@ -121,7 +123,7 @@ def as_html(r: dict, standalone: bool = False) -> str:
 {"<h2>Price alerts hit</h2><ul>" + "".join(f"<li>{e(a['label'])} {e(a['direction'])} {a['price']:,.5g}</li>" for a in r['price_alerts']) + "</ul>" if r["price_alerts"] else ""}
 <h2>High-impact news this coming week</h2>
 {"<table><tr><th>When</th><th>Currency</th><th>Event</th><th class='num'>Forecast</th></tr>" + news_rows + "</table>" if news_rows else "<p>None in the calendar yet.</p>"}
-<p class="foot">Paper trading results from rules you set yourself. Past results don't predict future ones. Not financial advice.</p>
+<p class="foot">Paper trading results from rules you set yourself. Past results don't predict future ones. Not financial advice. {html.escape(PAPER_NOTE)}</p>
 """
     css = """body{font-family:-apple-system,Segoe UI,sans-serif;color:#0d1220;max-width:760px;margin:2rem auto;padding:0 1rem;line-height:1.5}
 h1{margin:0}h2{margin-top:1.8rem;font-size:1.15rem}.muted,.sub,.foot{color:#5d6677}.sub{font-size:.85em}

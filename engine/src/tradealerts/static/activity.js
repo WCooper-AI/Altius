@@ -1,7 +1,7 @@
 /* Trading Alerts: the Activity page. Everything that happened, newest first, with filters.
    It doubles as the notifications centre: opening it marks everything as seen. */
 
-import { $main, append, clear, GET, h, POST, toast, when } from "./util.js";
+import { $main, append, clear, GET, h, PAPER_NOTE, POST, toast, when } from "./util.js";
 import { refreshBell, skeleton } from "./widgets.js";
 import { setNav } from "./boot.js";
 
@@ -107,6 +107,7 @@ export async function viewActivity() {
     const ul = h("ul", { class: "activity" }, res.items.map((x) => item(mark(x))));
     if (!res.items.length && !res.now.length) out.appendChild(h("div", { class: "empty" }, h("p", {}, emptyText())));
     else out.appendChild(ul);
+    if (category === "trades" && res.items.length) out.appendChild(h("p", { class: "small muted paper-note" }, PAPER_NOTE));
     foot.hidden = !res.more;
     more.disabled = false;
     more.onclick = async () => {

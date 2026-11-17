@@ -1,5 +1,6 @@
 """More result measures: yearly growth, drawdown length, best and worst periods, the
-average of the worst days, and trades split by weekday and trading session.
+average of the worst days, trades split by weekday and trading session, results by calendar
+year, the range for the share of trades won, and how many trades overlapped.
 
 Plain numbers only: nothing here says whether a result is good or bad."""
 
@@ -8,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from . import timeframes
+from . import stats, timeframes
 
 MIN_YEARS_FOR_CAGR = 1.0  # shorter tests stretched to a year give wild, misleading rates
 ES_SHARE = 0.05  # expected shortfall: the worst 5% of days
@@ -171,6 +172,52 @@ def by_session(trades: pd.DataFrame, timeframe: str) -> list[dict]:
     return _groups(trades, session_names(_opened(trades)), SESSION_ORDER)
 
 
+def by_year(trades: pd.DataFrame, equity: pd.Series) -> list[dict]:
+    """Results for each calendar year (UTC) of the test: change in the balance (the first year
+    starts from the opening balance), worst drop within the year (from the balance's high so far
+    that year), and the trades that closed in it."""
+    ch = period_changes(equity, "YE")
+    if not len(ch):
+        return []
+    eq = equity.copy()
+    eq.index = _utc(eq.index)
+    closed = pd.to_datetime(trades["exit_time"], utc=True).dt.year if len(trades) and "exit_time" in trades else None
+    rows = []
+    for stamp, pct in ch.items():
+        y = int(stamp.year)
+        part = eq[eq.index.year == y]
+        prev = eq[eq.index.year < y]
+        first = float(prev.iloc[-1]) if len(prev) else float(eq.iloc[0])
+        path = np.concatenate(([first], part.to_numpy(dtype=float)))
+        peak = np.maximum.accumulate(path)
+        dd = float(((path / np.where(peak > 0, peak, np.nan)) - 1).min() * 100) if len(path) else 0.0
+        t = trades[(closed == y).to_numpy()] if closed is not None else trades.iloc[0:0]
+        pnl = t["pnl"].to_numpy(dtype=float) if len(t) else np.empty(0)
+        rows.append({"year": y, "change_pct": float(pct), "max_drawdown_pct": dd if np.isfinite(dd) else None,
+                     "trades": int(len(t)), "won_pct": float((pnl > 0).mean() * 100) if len(pnl) else None,
+                     "pnl": float(pnl.sum()),
+                     "avg_r": float(t["r_multiple"].mean()) if len(t) and "r_multiple" in t else None})
+    return rows
+
+
+def win_rate_range(trades: pd.DataFrame) -> list[float] | None:
+    """95% range (Wilson) for the share of trades won, in %. None without trades."""
+    if not len(trades):
+        return None
+    lo, hi = stats.wilson(int((trades["pnl"] > 0).sum()), len(trades))
+    return [lo * 100, hi * 100]
+
+
+def overlapping_trades(trades: pd.DataFrame) -> int:
+    """How many trades opened while an earlier one was still open."""
+    if len(trades) < 2 or "entry_time" not in trades or "exit_time" not in trades:
+        return 0
+    t = pd.DataFrame({"a": pd.to_datetime(trades["entry_time"], utc=True),
+                      "b": pd.to_datetime(trades["exit_time"], utc=True)}).sort_values("a", kind="stable")
+    still_open = t["b"].cummax().shift(1)
+    return int((t["a"] < still_open).sum())
+
+
 def extra(trades: pd.DataFrame, equity: pd.Series, start_equity: float, start, end,
           max_drawdown_pct: float, timeframe: str) -> dict:
     """All of the above, as metric keys for ``backtest.compute_metrics``."""
@@ -183,4 +230,7 @@ def extra(trades: pd.DataFrame, equity: pd.Series, start_equity: float, start, e
         "periods": best_worst(equity),
         "by_weekday": by_weekday(trades),
         "by_session": by_session(trades, timeframe),
+        "by_year": by_year(trades, equity),
+        "win_rate_range": win_rate_range(trades),
+        "overlapping_trades": overlapping_trades(trades),
     }
