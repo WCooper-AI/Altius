@@ -9,6 +9,7 @@ server's environment or point outside their own folder.
 from __future__ import annotations
 
 import contextlib
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,6 +17,15 @@ import yaml
 
 from .config import AppConfig, ConfigError, load_config, read_raw
 from .state import StateStore
+
+def write_private(path: Path, data: bytes) -> None:
+    """Write a file only its owner can read (on Windows the user's folders already are)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    if os.name == "posix":
+        os.chmod(path, 0o600)  # an older file keeps its mode through O_CREAT
+
 
 CONFIG_HEADER = "# Trading Alerts settings. Edited in the web interface; you can also edit by hand.\n"
 
@@ -74,7 +84,8 @@ class Workspace:
             new = keychain.stash(new, self.raw_config())
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.config_path.with_name(self.config_path.name + ".tmp")
-        tmp.write_text(CONFIG_HEADER + yaml.safe_dump(new, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        # Owner-only: without a password store, alert tokens and passwords are in this file.
+        write_private(tmp, (CONFIG_HEADER + yaml.safe_dump(new, sort_keys=False, allow_unicode=True)).encode("utf-8"))
         tmp.replace(self.config_path)
 
     def ensure(self) -> None:

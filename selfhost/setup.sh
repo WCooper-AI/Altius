@@ -201,7 +201,7 @@ do_docker() {
   if [ ! -f "$compose_dir/.env" ]; then
     local pw
     pw="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)"
-    printf 'TRADEALERTS_PASSWORD=%s\n' "$pw" > "$compose_dir/.env"
+    (umask 077 && printf 'TRADEALERTS_PASSWORD=%s\n' "$pw" > "$compose_dir/.env")  # owner-only
     bold "Your web interface password is: $pw"
     say "(It's saved in $compose_dir/.env. Change it there and restart to choose your own.)"
   fi
