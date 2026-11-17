@@ -374,8 +374,7 @@ function optimiserPane({ fetchData, settings, apply, period, strategyId = null, 
       h("div", { class: "inline", style: "justify-content:space-between;align-items:center;gap:1rem" },
         h("p", { class: "small muted", style: "margin:0" }, st && st.status === "queued" ? "Waiting for a free worker…" : total ? `${done.toLocaleString()} of ${total.toLocaleString()} combinations tested (${pct}%)` : "Starting…"),
         h("button", { type: "button", class: "quiet", onclick: stop }, "Stop")),
-      h("div", { class: "progress", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(pct),
-        style: "height:.45rem;border-radius:999px;background:var(--glass-thin);overflow:hidden;margin:.4rem 0 .2rem" },
+      h("div", { class: "progress bt-progress", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(pct) },
         h("span", { class: "progress-fill", style: `width:${pct}%` })),
     ]);
   }

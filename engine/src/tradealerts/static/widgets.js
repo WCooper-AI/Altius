@@ -3,9 +3,10 @@
 
 import { app, append, clear, day, GET, h, nf, POST, short, svg, toast, when } from "./util.js";
 import { pref, savePref } from "./testing.js";
-import { effectiveTheme, setTheme } from "./settings.js";
+import { effectiveTheme, revealSetting, setTheme, SETTINGS_INDEX } from "./settings.js";
 import { journalDialog, viewJournal } from "./journal.js";
 import { refreshStatus, route, toggleRunnerPanel } from "./boot.js";
+import { commandDialog } from "./cmdk.js";
 
 // --------------------------------------------------------------------- loading skeletons
 
@@ -48,59 +49,72 @@ export function expandable(wrap, onKey = null) {
   return btn;
 }
 
+// --------------------------------------------------------------------- retro pixel button
+
+/** A call-to-action button after shitui's Retro Pixel Button: an accent block with a pixel arrow slides across on hover. */
+export function pixelButton(label, attrs = {}) {
+  const arrow = svg("svg", { viewBox: "0 0 14 26", "aria-hidden": "true" });
+  for (const [x, y] of [[1, 3], [5, 7], [9, 11], [5, 15], [1, 19]]) arrow.appendChild(svg("rect", { x, y, width: 4, height: 4 }));
+  return h("button", { type: "button", ...attrs, class: ["pixel-button", attrs.class].filter(Boolean).join(" ") },
+    h("span", { class: "pixel-block", "aria-hidden": "true" }, arrow),
+    h("span", { class: "pixel-label" }, label));
+}
+
 // --------------------------------------------------------------------- command palette (Ctrl+K)
 
 let paletteCache = null;
+const navIcon = (name) => { const s = document.querySelector(`[data-nav="${name}"] svg`); return s ? s.cloneNode(true) : null; };
 async function openPalette() {
   if (document.querySelector(".palette")) return;
-  const input = h("input", { type: "search", placeholder: "Jump to a page, strategy or market, or run an action…", "aria-label": "Search", autocomplete: "off" });
-  const list = h("ul", { class: "palette-list", role: "listbox" });
-  const dlg = h("dialog", { class: "palette", "aria-label": "Search and jump" }, input, list,
-    h("p", { class: "small muted palette-hint" }, "↑ ↓ to choose · Enter to open · Esc to close"));
   const go = (hash) => () => { location.hash = hash; };
-  const base = [
-    ["Page", "Dashboard", go("#/")], ["Page", "Markets", go("#/markets")], ["Page", "Strategies", go("#/strategies")],
-    ["Page", "News", go("#/news")], ["Page", "Activity", go("#/activity")], ["Page", "Journal", go("#/journal")], ["Page", "Settings", go("#/settings")],
-    ["Action", "Create a strategy", go("#/create")], ["Action", "Build a strategy from scratch", go("#/new")],
-    ["Action", "Test strategies together", go("#/portfolio")], ["Action", "Compare backtests side by side", go("#/compare")],
-    ["Action", "Add a journal trade", () => { location.hash = "#/journal"; setTimeout(() => journalDialog(null, viewJournal), 400); }],
-    ["Action", "Switch light / dark", () => setTheme(effectiveTheme() === "dark" ? "light" : "dark")],
-    ["Action", "Check now", async () => { try { await POST("/run-now"); toast("Check finished"); refreshStatus(); } catch (e) { toast(e.message, true); } }],
-    ["Action", "View this week's report", () => window.open("/api/report.html", "_blank", "noopener")],
-    ["Action", "Download a backup", () => { location.href = "/api/backup"; }],
-  ];
-  for (const m of app.recipes.markets) base.push(["Market", `${m.label} chart`, () => { savePref("ta-live-market", m.key); location.hash = "#/markets"; if (location.hash === "#/markets") route(); }]);
-  let items = base;
-  try {
-    paletteCache = paletteCache || await GET("/strategies");
-    items = [...paletteCache.strategies.filter((x) => !x.error).map((x) => ["Strategy", x.data.name || x.id, go("#/s/" + x.id)]), ...base];
-  } catch (_) { /* pages and actions still work */ }
-  let sel = 0, shown = [];
-  function render() {
-    const q = input.value.trim().toLowerCase();
-    shown = items.filter(([k, t]) => !q || `${k} ${t}`.toLowerCase().includes(q)).slice(0, 12);
-    sel = Math.min(sel, Math.max(0, shown.length - 1));
-    clear(list);
-    shown.forEach(([kind, title, fn], i) => list.appendChild(h("li", { role: "option", "aria-selected": String(i === sel),
-      onclick: () => { dlg.close(); fn(); }, onmousemove: () => { if (sel !== i) { sel = i; render(); } } },
-      h("span", { class: "palette-kind" }, kind), h("span", {}, title))));
-    if (!shown.length) list.appendChild(h("li", { class: "muted" }, "Nothing found"));
-  }
-  input.addEventListener("input", () => { sel = 0; render(); });
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowDown") { sel = Math.min(sel + 1, shown.length - 1); render(); e.preventDefault(); }
-    else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); render(); e.preventDefault(); }
-    else if (e.key === "Enter" && shown[sel]) { dlg.close(); shown[sel][2](); }
-    else if (e.key === "Escape") { e.preventDefault(); dlg.close(); }
+  const page = (name, title, hash, keywords) => ({ value: title, keywords, icon: navIcon(name), hint: location.hash === hash || (!location.hash && hash === "#/") ? "You're here" : null, onSelect: go(hash) });
+  const pages = { heading: "Pages", items: [
+    page("dashboard", "Dashboard", "#/", ["home", "overview"]), page("markets", "Markets", "#/markets", ["chart", "prices"]),
+    page("strategies", "Strategies", "#/strategies", ["list"]), page("news", "News", "#/news", ["calendar", "events"]),
+    page("activity", "Activity", "#/activity", ["log", "alerts", "history"]), page("journal", "Journal", "#/journal", ["trades", "diary"]),
+    page("settings", "Settings", "#/settings", ["preferences", "options"]),
+  ] };
+  const actions = { heading: "Actions", items: [
+    { value: "Create a strategy", keywords: ["new", "guided"], onSelect: go("#/create") },
+    { value: "Build a strategy from scratch", keywords: ["new", "editor", "advanced"], onSelect: go("#/new") },
+    { value: "Test strategies together", keywords: ["portfolio"], onSelect: go("#/portfolio") },
+    { value: "Compare backtests side by side", keywords: ["compare"], onSelect: go("#/compare") },
+    { value: "Add a journal trade", keywords: ["log", "trade"], onSelect: () => { location.hash = "#/journal"; setTimeout(() => journalDialog(null, viewJournal), 400); } },
+    { value: "Switch light / dark", keywords: ["theme", "dark mode", "appearance"], onSelect: () => setTheme(effectiveTheme() === "dark" ? "light" : "dark") },
+    { value: "Check now", keywords: ["run", "refresh"], onSelect: async () => { try { await POST("/run-now"); toast("Check finished"); refreshStatus(); } catch (e) { toast(e.message, true); } } },
+    { value: "View this week's report", keywords: ["weekly", "summary"], onSelect: () => window.open("/api/report.html", "_blank", "noopener") },
+    { value: "Download a backup", keywords: ["export", "save"], onSelect: () => { location.href = "/api/backup"; } },
+  ] };
+  const markets = { heading: "Markets", items: app.recipes.markets.map((m) => ({ value: `${m.label} chart`, keywords: [m.key], hint: "Chart",
+    onSelect: () => { savePref("ta-live-market", m.key); location.hash = "#/markets"; if (location.hash === "#/markets") route(); } })) };
+  const settings = { heading: "Settings", items: SETTINGS_INDEX.map(([title, section, find, words]) => ({
+    value: title, keywords: [section, "setting", ...words.split(" ")], hint: section, icon: navIcon("settings"),
+    onSelect: () => {
+      // Already on Settings: jump without reloading the page (which would lose unsaved edits).
+      if (location.hash.startsWith("#/settings") && document.querySelector("#main .save-bar")) setTimeout(() => revealSetting(section, find), 0);
+      else location.hash = `#/settings?in=${encodeURIComponent(section)}&find=${encodeURIComponent(find)}`;
+    } })) };
+  const kbd = (t) => h("kbd", {}, t);
+  const menu = commandDialog([pages, actions, settings, markets], {
+    className: "palette", label: "Search and jump", placeholder: "Jump to a page, strategy or market, or run an action…", empty: "Nothing found.",
+    footer: h("div", { class: "palette-hint small muted" }, kbd("↑"), kbd("↓"), " to choose ", kbd("Enter"), " to open ", kbd("Esc"), " to close"),
   });
-  const closeOnNav = () => { if (dlg.open) dlg.close(); };
+  const closeOnNav = () => { if (menu.dialog.open) menu.close(); };
   window.addEventListener("hashchange", closeOnNav, { once: true });
-  dlg.addEventListener("close", () => dlg.remove());
-  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
-  document.body.appendChild(dlg);
-  render();
-  dlg.showModal();
-  input.focus();
+  if (paletteCache) { menu.setGroups([strategyGroup(paletteCache), pages, actions, settings, markets]); return; }
+  menu.setLoading(true);
+  try {
+    paletteCache = await GET("/strategies");
+    if (menu.dialog.open) menu.setGroups([strategyGroup(paletteCache), pages, actions, settings, markets]);
+  } catch (_) { /* pages and actions still work */ }
+  finally { menu.setLoading(false); }
+}
+function strategyGroup(list) {
+  return { heading: "Strategies", items: list.strategies.filter((x) => !x.error).map((x) => {
+    const market = (x.data.market || {}).label || (x.data.market || {}).symbol || "";
+    return { value: x.data.name || x.id, keywords: [x.id, market].filter(Boolean), icon: navIcon("strategies"), hint: market || null,
+      onSelect: () => { location.hash = "#/s/" + x.id; } };
+  }) };
 }
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if (app.recipes) openPalette(); }
