@@ -358,6 +358,28 @@ def cmd_verify_backup(args) -> int:
     return 0
 
 
+def cmd_benchmark(args) -> int:
+    from .benchmarks import compare, write_expected
+
+    root = Path(args.dir)
+    if not (root / "strategies").is_dir():
+        print(f"No benchmarks found at {root.resolve()} (run from the repository root, or pass --dir)",
+              file=sys.stderr)
+        return 1
+    if args.write:
+        results = write_expected(root)
+        print(f"Wrote expected metrics for {len(results)} benchmark(s) to {root / 'expected'}")
+        return 0
+    problems = compare(root)
+    if not problems:
+        print(f"All benchmarks under {root} still match their committed expected metrics.")
+        return 0
+    print(f"{len(problems)} mismatch(es) against the committed expected metrics:")
+    for p in problems:
+        print(f"- {p}")
+    return 1
+
+
 # --------------------------------------------------------------------------- parser
 
 
@@ -445,6 +467,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("verify-backup", help="check a backup zip reads back cleanly")
     s.add_argument("file")
     s.set_defaults(func=cmd_verify_backup)
+
+    s = sub.add_parser("benchmark", help="rerun the example benchmarks and compare with their expected metrics")
+    s.add_argument("--dir", default="benchmarks", help="the benchmarks folder (default: ./benchmarks)")
+    s.add_argument("--write", action="store_true",
+                   help="overwrite the expected metrics with a fresh run (after a reviewed change to the simulator)")
+    s.set_defaults(func=cmd_benchmark)
     return p
 
 
