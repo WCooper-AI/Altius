@@ -22,7 +22,7 @@ from ... import __version__, keychain
 from ...config import PATH_KEYS, ConfigError, load_config, uses_env
 from ...state import StateStore
 from ...strategy import strategy_files
-from ...workspace import CONFIG_HEADER, Workspace
+from ...workspace import CONFIG_HEADER, Workspace, write_private
 from ..common import err, workspace
 from ..strategy_io import enforce_running_limit
 
@@ -332,7 +332,7 @@ async def restore(request: Request, ws: Workspace = Depends(workspace)):
         for old in sorted(keep.glob("before-restore-*.zip"))[:-4]:  # keep the last five
             old.unlink(missing_ok=True)
         safety = keep / f"before-restore-{time.strftime('%Y%m%d-%H%M%S')}.zip"
-        safety.write_bytes(make_backup(ws))
+        write_private(safety, make_backup(ws))  # holds the secrets too
         apply_backup(ws, b)
     if not ws.trusted:
         # Strategies this service can't run (e.g. a CSV path or price source from the self-hosted

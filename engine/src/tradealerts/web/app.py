@@ -161,8 +161,19 @@ def build_app(ctx: AppContext, *, authorize: Callable[[Request], Response | None
 # --------------------------------------------------------------------------- self-hosted edition
 
 
+# Headers a reverse proxy adds. A browser on this computer never sends them.
+PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "forwarded")
+NO_PASSWORD_BEHIND_PROXY = (
+    "This copy of Altius has no password, but this request came through a reverse proxy, so it may be "
+    "reachable from the internet. Set TRADEALERTS_PASSWORD and restart, or pass --no-auth if the proxy "
+    "already checks who signs in.")
+
+
 def create_app(config_path: str | Path | None = None, password: str | None = None, runner=None,
-               allowed_hosts: set[str] | None = None, desktop: bool = False, keychain: bool = False) -> FastAPI:
+               allowed_hosts: set[str] | None = None, desktop: bool = False, keychain: bool = False,
+               refuse_proxied: bool = False) -> FastAPI:
+    """``refuse_proxied``: with no password, refuse API requests that came through a reverse
+    proxy (``serve`` sets it unless --no-auth says the proxy handles sign-in)."""
     from .. import news
 
     ws = Workspace(Path(config_path) if config_path else Path("config.yaml"), keychain=keychain)
@@ -174,6 +185,8 @@ def create_app(config_path: str | Path | None = None, password: str | None = Non
     ctx = SelfHostContext(ws, auth, runner=runner, desktop=desktop)
 
     def authorize(request: Request):
+        if refuse_proxied and not auth.enabled and any(h in request.headers for h in PROXY_HEADERS):
+            return JSONResponse({"detail": NO_PASSWORD_BEHIND_PROXY}, 403)
         if request.url.path in ("/api/session", "/api/login") or ctx.signed_in(request):
             return None
         return JSONResponse({"detail": "Sign in to continue"}, 401)
@@ -250,7 +263,8 @@ def serve(config_path: str | None, host: str, port: int, run_live: bool = True, 
     runner = LiveRunner(Workspace(Path(path))).start() if run_live else None
     # On this computer only, refuse requests addressed to any other host name (DNS rebinding).
     hosts = {f"{n}:{port}" for n in ("127.0.0.1", "localhost", "[::1]")} if loopback else None
-    app = create_app(path, password=password, runner=runner, allowed_hosts=hosts, desktop=desktop, keychain=keychain)
+    app = create_app(path, password=password, runner=runner, allowed_hosts=hosts, desktop=desktop, keychain=keychain,
+                     refuse_proxied=not no_auth)
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning",
                                            proxy_headers=not loopback))
     app.state.ctx.shutdown = lambda: setattr(server, "should_exit", True)

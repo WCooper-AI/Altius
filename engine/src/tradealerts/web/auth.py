@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import math
-import os
 import secrets
 import sqlite3
 import threading
@@ -17,6 +16,7 @@ from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 
 from ..state import LOGIN_ATTEMPTS
+from ..workspace import write_private
 from .common import err
 
 COOKIE = "ta_session"
@@ -67,6 +67,50 @@ class LoginThrottle:
             count, until = self._failures.get(key, (0, 0.0))
         return max(0.0, until - time.time())
 
+    def attempt(self, *keys: str) -> float:
+        """Count one sign-in attempt for each key *before* the password is checked.
+
+        Returns 0 when the attempt may go ahead (call ``ok`` for each key if the password is
+        right), or the seconds to wait when any key is locked (nothing is counted then).
+        Checking and counting happen together, so many requests sent at once can't all slip
+        through before the first wrong password is recorded.
+        """
+        now = time.time()
+        with self._lock:
+            if self.db_path:
+                if now - self._cleaned > self.CLEAN_EVERY:
+                    self.cleanup(now)
+                db = sqlite3.connect(self.db_path, timeout=15, isolation_level=None)
+                try:
+                    db.execute("BEGIN IMMEDIATE")  # other processes on this database wait their turn
+                    try:
+                        rows = {k: db.execute("SELECT attempts, locked_until FROM login_attempts WHERE ip = ?",
+                                              (k,)).fetchone() for k in keys}
+                        wait = max([r[1] - now for r in rows.values() if r] + [0.0])
+                        if wait <= 0:
+                            for k, r in rows.items():
+                                count = (r[0] if r else 0) + 1
+                                db.execute("INSERT INTO login_attempts (ip, attempts, locked_until, last_attempt) "
+                                           "VALUES (?, ?, ?, ?) ON CONFLICT(ip) DO UPDATE SET "
+                                           "attempts = excluded.attempts, locked_until = excluded.locked_until, "
+                                           "last_attempt = excluded.last_attempt", (k, count, now + self._wait(count), now))
+                        db.execute("COMMIT")
+                    except BaseException:
+                        db.execute("ROLLBACK")
+                        raise
+                finally:
+                    db.close()
+                return max(0.0, wait)
+            wait = max([self._failures.get(k, (0, 0.0))[1] - now for k in keys] + [0.0])
+            if wait > 0:
+                return wait
+            if len(self._failures) > self.MAX_TRACKED:
+                self._failures = {k: v for k, v in self._failures.items() if v[1] > now}
+            for k in keys:
+                count = self._failures.get(k, (0, 0.0))[0] + 1
+                self._failures[k] = (count, now + self._wait(count))
+            return 0.0
+
     def failed(self, key: str) -> None:
         now = time.time()
         with self._lock:
@@ -113,11 +157,7 @@ class Auth:
         if self.password:
             secret_file.parent.mkdir(parents=True, exist_ok=True)
             if not secret_file.exists():
-                secret_file.write_bytes(secrets.token_bytes(32))
-                try:
-                    os.chmod(secret_file, 0o600)
-                except OSError:
-                    pass
+                write_private(secret_file, secrets.token_bytes(32))
             # Changing the password signs everyone out.
             self.key = secret_file.read_bytes() + hashlib.sha256(self.password.encode()).digest()
 
@@ -143,10 +183,13 @@ class Auth:
     def locked_for(self, ip: str) -> float:
         return self.throttle.locked_for(ip)
 
-    def check_password(self, ip: str, attempt: str) -> bool:
-        ok = hmac.compare_digest(
+    def matches(self, attempt: str) -> bool:
+        return hmac.compare_digest(
             hashlib.sha256(attempt.encode()).digest(), hashlib.sha256(self.password.encode()).digest()
         )
+
+    def check_password(self, ip: str, attempt: str) -> bool:
+        ok = self.matches(attempt)
         (self.throttle.ok if ok else self.throttle.failed)(ip)
         return ok
 
@@ -163,11 +206,12 @@ def router(auth: Auth) -> APIRouter:
         if not auth.enabled:
             return {"signed_in": True}
         ip = request.client.host if request.client else "?"
-        wait = auth.locked_for(ip)
+        wait = auth.throttle.attempt(ip)  # counted before checking, so parallel guesses can't skip the wait
         if wait:
             err(429, f"Too many attempts. Try again in {math.ceil(wait)} seconds.")
-        if not auth.check_password(ip, str(body.get("password", ""))):
+        if not auth.matches(str(body.get("password", ""))):
             err(401, "That password isn't right")
+        auth.throttle.ok(ip)
         resp = JSONResponse({"signed_in": True})
         resp.set_cookie(COOKIE, auth.token(), max_age=SESSION_DAYS * 86400, httponly=True,
                         samesite="strict", secure=is_https(request), path="/")

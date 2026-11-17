@@ -42,6 +42,14 @@ def is_placeholder(value) -> bool:
     return isinstance(value, str) and value.startswith(PREFIX)
 
 
+def _file_store(kr) -> bool:
+    """keyrings.alt's stores are a file next to config.yaml in all but name (one is plain text,
+    the other asks for a master password on the console, which would stop a server), so they
+    don't count as a password store. With several stores, the first one is the one used."""
+    first = (getattr(kr, "backends", None) or [kr])[0]
+    return type(first).__module__.startswith("keyrings.alt")
+
+
 def backend():
     """The password store, or None when there isn't a usable one."""
     global _backend, _checked
@@ -51,7 +59,7 @@ def backend():
             import keyring
             from keyring.backends import fail
             kr = keyring.get_keyring()
-            if not isinstance(kr, fail.Keyring) and kr.priority > 0:
+            if not isinstance(kr, fail.Keyring) and kr.priority > 0 and not _file_store(kr):
                 _backend = keyring
         except Exception as exc:  # missing package, or the store can't be reached
             log.debug("No password store: %s", exc)
