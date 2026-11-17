@@ -6,10 +6,13 @@ import json
 import logging
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
 
 NTFY_PRIORITIES = {"min": 1, "low": 2, "default": 3, "high": 4, "max": 5, "urgent": 5}
+MAX_DELIVERY_ATTEMPTS = 5                          # gives up after this many tries in total
+RETRY_BACKOFF_SECONDS = (30, 120, 600, 1800)       # before retries 2, 3, 4 and 5
 
 
 @dataclass
@@ -221,13 +224,82 @@ def build_notifiers(specs: list[dict]) -> list[Notifier]:
     return out
 
 
-def broadcast(notifiers: list[Notifier], msg: Message) -> list[str]:
-    """Send to every notifier; returns a list of error strings (empty on success)."""
-    errors = []
+def send_each(notifiers: list[Notifier], msg: Message) -> list[tuple[str, str | None]]:
+    """Send to every notifier; (channel name, error) for each one (error is None on success)."""
+    out = []
     for n in notifiers:
         try:
             n.send(msg)
+            out.append((n.name, None))
         except Exception as exc:  # keep going if one channel is down
             log.warning("Notifier %s failed: %s", n.name, exc)
-            errors.append(f"{n.name}: {exc}")
-    return errors
+            out.append((n.name, str(exc)))
+    return out
+
+
+def broadcast(notifiers: list[Notifier], msg: Message) -> list[str]:
+    """Send to every notifier; returns a list of error strings (empty on success)."""
+    return [f"{name}: {error}" for name, error in send_each(notifiers, msg) if error]
+
+
+def _parse(ts) -> datetime:
+    dt = datetime.fromisoformat(str(ts))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.isoformat(timespec="milliseconds")
+
+
+def _retry_delay(attempts: int) -> int:
+    """Seconds to wait before trying again, after this many attempts so far."""
+    return RETRY_BACKOFF_SECONDS[min(attempts, len(RETRY_BACKOFF_SECONDS)) - 1]
+
+
+def record_deliveries(store, outcomes: list[tuple[str, str | None]], *, strategy_id: str | None = None,
+                      run_id: int | None = None, kind: str = "", title: str = "", body: str = "",
+                      priority: str = "default", now=None) -> None:
+    """Save what just happened on each channel from :func:`send_each`, so a channel that
+    failed can be tried again with a backoff (see :func:`retry_pending`) up to
+    ``MAX_DELIVERY_ATTEMPTS`` times, instead of needing attention for one bad moment.
+
+    Called after the triggering trade/event is safely saved, never as part of the same
+    database transaction: losing a delivery record to a crash only means one retry isn't
+    tracked, where losing the trade record would mean it gets replayed.
+    """
+    when = _parse(now) if now is not None else datetime.now(timezone.utc)
+    for name, error in outcomes:
+        if error is None:
+            store.add_delivery(strategy_id=strategy_id, run_id=run_id, channel=name, kind=kind,
+                               title=title, body=body, priority=priority, status="sent", attempts=1,
+                               error=None, next_retry_at=None)
+        else:
+            next_at = _iso(when + timedelta(seconds=_retry_delay(1)))
+            store.add_delivery(strategy_id=strategy_id, run_id=run_id, channel=name, kind=kind,
+                               title=title, body=body, priority=priority, status="retrying", attempts=1,
+                               error=error, next_retry_at=next_at)
+
+
+def retry_pending(store, notifiers: list[Notifier], now=None) -> list[dict]:
+    """Try again every delivery that's due a retry. Returns the ones that have just run out
+    of attempts (now ``failed``), so the caller can raise one ``alert_failed`` problem each."""
+    when = _parse(now) if now is not None else datetime.now(timezone.utc)
+    by_name = {n.name: n for n in notifiers}
+    exhausted = []
+    for row in store.due_deliveries(_iso(when)):
+        n = by_name.get(row["channel"])
+        if n is None:
+            continue  # that channel isn't configured any more
+        msg = Message(row["title"] or "", row["body"] or "", row["priority"] or "default")
+        try:
+            n.send(msg)
+            store.update_delivery(row["id"], status="sent", attempts=row["attempts"], error=None, next_retry_at=None)
+        except Exception as exc:
+            attempts = row["attempts"] + 1
+            if attempts >= MAX_DELIVERY_ATTEMPTS:
+                store.update_delivery(row["id"], status="failed", attempts=attempts, error=str(exc), next_retry_at=None)
+                exhausted.append({**row, "attempts": attempts, "error": str(exc)})
+            else:
+                next_at = _iso(when + timedelta(seconds=_retry_delay(attempts)))
+                store.update_delivery(row["id"], status="retrying", attempts=attempts, error=str(exc), next_retry_at=next_at)
+    return exhausted

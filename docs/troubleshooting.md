@@ -48,6 +48,17 @@ common ones. Self-hosted, the server's log (the terminal window, the service's l
 | Email alerts fail | The SMTP host, port and security (STARTTLS or SSL) must match your provider; many need an app password rather than the account password. |
 | Telegram sends nothing | Start a chat with your bot first; the chat ID comes from @userinfobot. |
 | Hosted edition: "only public internet addresses" | Webhooks and SMTP servers on the hosted edition must be reachable from the internet. |
+| A channel fails once and the alert is late, not missing | A failed send is retried a few times with a growing wait (up to about 30 minutes) before it's reported as failed, so a short outage usually fixes itself. Settings shows each channel's last delivered and last failed time. |
+| "Alert not sent after N tries" in Activity | The channel kept failing through every retry. Check the reason given (wrong token, server down, address unreachable) and fix it; the next alert tries again from scratch. |
+
+## Operations
+
+| Problem | What to do |
+|---|---|
+| A background run (optimiser, luck check) shows "failed: The server restarted while this was running" | The server stopped or crashed while it was going; that's expected after a restart, not a sign of a bad run. Start it again. |
+| Checking the database is sound | `tradealerts check-db` (also run automatically each time the server starts; a problem shows in Activity as "Database problem"). |
+| Checking a backup file is good before relying on it | `tradealerts verify-backup <file>`. A backup made from Settings is also checked automatically right after it's created; `GET /api/health` reports when one last checked out. |
+| Is the live checker actually running | `GET /api/health` (also under `/api/v1`) gives a quick machine-readable summary: database ok, when the checker last ran, and background job counts. For the page people read, see the dashboard or `GET /api/status`. |
 
 ## Using the API
 

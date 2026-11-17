@@ -102,3 +102,23 @@ def paper(ws: Workspace = Depends(workspace)):
             return {"states": {}, "trades": [], "events": []}
         return clean({"states": store.all_states(), "trades": list(reversed(store.trades()))[:500],
                       "events": store.recent_events(100)})
+
+
+@router.get("/api/health")
+def health(request: Request, ws: Workspace = Depends(workspace)):
+    """A quick operational check: is the database sound, is the live checker running, and
+    when did it last check. For a monitoring script, not for people (see /api/status)."""
+    ctx = ctx_of(request)
+    with ws.store(create=False) as store:
+        db_problem = store.quick_check() if store else None
+        jobs = store.job_counts() if store else {}
+        last_backup = store.get_value("last_backup_at") if store else None
+    runner = ctx.runner_status(ws)
+    return clean({
+        "db_ok": db_problem is None,
+        "db_problem": db_problem,
+        "runner_alive": bool(runner.get("enabled")),
+        "last_check": runner.get("last_run"),
+        "jobs": jobs,
+        "last_backup_at": last_backup,
+    })

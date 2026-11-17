@@ -410,8 +410,10 @@ def optimise(request: Request, body: dict = Body(...), ws: Workspace = Depends(w
 
 @router.get("/api/jobs")
 def job_list(request: Request, ws: Workspace = Depends(workspace)):
-    """This workspace's background runs, newest first, without their results."""
-    return {"jobs": clean(ctx_of(request).jobs.list(ws.owner))}
+    """This workspace's background runs, newest first, without their results. Includes
+    jobs from before a restart (shown as failed; see ``fail_stale_jobs``)."""
+    with ws.store(create=False) as store:
+        return {"jobs": clean(ctx_of(request).jobs.list(ws.owner, store))}
 
 
 @router.get("/api/jobs/{job_id}")

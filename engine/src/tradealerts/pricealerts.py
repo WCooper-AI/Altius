@@ -13,7 +13,7 @@ import logging
 import pandas as pd
 
 from . import data as data_mod
-from .notify import Message, Notifier, broadcast
+from .notify import Message, Notifier, record_deliveries, send_each
 from .recipes import MARKETS_BY_KEY
 from .state import StateStore
 
@@ -85,11 +85,15 @@ def check_price_alerts(cfg, store: StateStore, notifiers: list[Notifier], now=No
             body = (f"{label} {verb} {price:,.5g} ({word} your level) around {t:%a %d %b %H:%M} UTC.\n"
                     f"Latest price {last:,.5g}." + (f"\nNote: {a['note']}" if a.get("note") else "")
                     + "\nPrice alert you set. Not financial advice.")
-            errors = broadcast(notifiers, Message(f"{label} {word} {price:,.5g}", body, "high", ("bell",)))
+            title = f"{label} {word} {price:,.5g}"
+            outcomes = send_each(notifiers, Message(title, body, "high", ("bell",)))
+            errors = [f"{name}: {error}" for name, error in outcomes if error]
             if errors:
                 log.warning("Price alert %s: %s", a["id"], "; ".join(errors))
-                store.add_event("", t.isoformat(), "alert_failed",
-                                f"Alert not sent: {label} {word} {price:,.5g}\n" + "; ".join(errors), False)
+            if outcomes:
+                # A channel that failed is retried with backoff (runner.run_cycle), rather
+                # than raising ``alert_failed`` for one bad moment.
+                record_deliveries(store, outcomes, kind="price", title=title, body=body, priority="high", now=t)
             # triggered_price is the latest price when it fired (the level itself is "price")
             again = a.get("repeat") == "every"
             hit_checked_to = max(min(now, latest_end), t + pd.Timedelta(minutes=5)).isoformat(timespec="seconds")

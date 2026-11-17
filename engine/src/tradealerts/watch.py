@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import dataquality
-from .notify import Message, broadcast
+from .notify import Message, broadcast, record_deliveries, send_each
 from .state import StateStore
 
 # this many polls in a row with a stale feed before it counts as a data problem
@@ -22,10 +22,14 @@ BAD_POLLS = 3
 
 
 def _notify(store: StateStore, sid: str, run_id, t: str, kind: str, msg: Message, notifiers, send: bool) -> None:
-    errors = broadcast(notifiers, msg) if send else []
-    store.add_event(sid, t, kind, f"{msg.title}\n{msg.body}", send and not errors, run_id)
-    if errors:
-        store.add_event(sid, t, "alert_failed", f"Alert not sent: {msg.title}\n" + "; ".join(errors), False, run_id)
+    outcomes = send_each(notifiers, msg) if send else []
+    ok = all(error is None for _, error in outcomes)
+    store.add_event(sid, t, kind, f"{msg.title}\n{msg.body}", send and ok, run_id)
+    if outcomes:
+        # A channel that failed is retried with backoff (runner.run_cycle), rather than
+        # raising ``alert_failed`` for one bad moment.
+        record_deliveries(store, outcomes, strategy_id=sid, run_id=run_id, kind=kind, title=msg.title,
+                          body=msg.body, priority=msg.priority, now=t)
 
 
 def _get(store: StateStore, key: str, default):
