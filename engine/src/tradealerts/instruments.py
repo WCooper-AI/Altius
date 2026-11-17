@@ -21,6 +21,7 @@ HOURS = {
     "Commodities": "Almost 24 hours, Monday to Friday",
     "Currencies": "24 hours, Monday to Friday",
     "Crypto": "Every day, around the clock",
+    "Try it out": "24 hours, Monday to Friday (made-up prices)",
 }
 EXCHANGE_HOURS = {"XNYS": "New York exchange hours: 9:30 to 16:00 New York time, Monday to Friday"}
 

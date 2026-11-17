@@ -152,8 +152,8 @@ export async function route() {
     const parts = hash.slice(2).split("?")[0].split("/").map(decodeURIComponent);
     if (parts[0] === "s" && parts[1]) {
       const rec = await GET("/strategies/" + encodeURIComponent(parts[1]));
-      if (rec.data.recipe && parts[2] !== "advanced") await viewSimple(parts[1], rec.data, rec.run);
-      else await viewEditor(parts[1], null, rec.data, rec.run);
+      if (rec.data.recipe && parts[2] !== "advanced") await viewSimple(parts[1], rec.data, rec.run, rec.stages);
+      else await viewEditor(parts[1], null, rec.data, rec.run, rec.stages);
     }
     else if (parts[0] === "history" && parts[1]) await viewHistory(parts[1]);
     else if (parts[0] === "create") await viewCreate(parts[1]);

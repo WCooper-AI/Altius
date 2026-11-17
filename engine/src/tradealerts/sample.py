@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 import pandas as pd
 
@@ -34,3 +36,37 @@ def synthetic_bars(
     return pd.DataFrame(
         {"open": open_, "high": high, "low": low, "close": close, "volume": volume}, index=idx
     ).rename_axis("time").round(2)
+
+
+# The built-in "Sample data" market (``sample`` in the catalogue): one fixed series, generated
+# once per process from a fixed seed and start, then cut off at the current time. Because the
+# seed, start and length never change, the bars before any moment are always the same, so a
+# backtest run today and one run next month agree on the past, and a forward test sees new
+# bars arrive as time passes. 15-minute bars (so every candle size works), shut at the weekend.
+SAMPLE_START = "2024-01-01"
+SAMPLE_END = "2031-01-01"
+SAMPLE_FREQ = "15min"
+SAMPLE_PRICE = 5000.0
+SAMPLE_SEED = 7
+
+
+@functools.lru_cache(maxsize=1)
+def _sample_series() -> pd.DataFrame:
+    days = (pd.Timestamp(SAMPLE_END) - pd.Timestamp(SAMPLE_START)).days
+    df = synthetic_bars(start=SAMPLE_START, days=days, freq=SAMPLE_FREQ, start_price=SAMPLE_PRICE, seed=SAMPLE_SEED,
+                        weekdays_only=False)
+    # Shut for the weekend like the built-in index and currency markets (markethours.weekend_reopen):
+    # from Friday 17:00 to Sunday 18:00 New York time, so a forward test on it waits at the same times.
+    ny = df.index.tz_convert("America/New_York")
+    dow, hour = ny.day_of_week, ny.hour
+    shut = ((dow == 4) & (hour >= 17)) | (dow == 5) | ((dow == 6) & (hour < 18))
+    return df[~shut]
+
+
+def sample_bars(now: pd.Timestamp | str | None = None) -> pd.DataFrame:
+    """The sample market's bars whose candle had closed by ``now`` (default: the current time)."""
+    now = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+    if now.tzinfo is None:
+        now = now.tz_localize("UTC")
+    df = _sample_series()
+    return df[df.index + pd.Timedelta(SAMPLE_FREQ) <= now].copy()

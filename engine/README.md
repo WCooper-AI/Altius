@@ -4,6 +4,10 @@ The Python package (`tradealerts`) behind both editions of Trading Alerts: the b
 forward-test runner, alerts, SQLite storage and the web interface. The self-hosted edition
 runs it for one person; the hosted service runs it for many customers (see `cloud/`).
 
+The full documentation, including the [YAML reference](../docs/yaml-reference.md),
+[backtesting methodology](../docs/backtesting.md) and [developer architecture](../docs/architecture.md),
+is in [docs/](../docs/README.md). This page is the short reference kept next to the code.
+
 ## Layout
 
 ```
@@ -11,6 +15,7 @@ src/tradealerts/
   strategy.py rules.py indicators.py   strategy files, the rule language, indicators
   simulator.py backtest.py analysis.py how trades fill; backtests; compare settings, luck check
   stats.py invariants.py limits.py     luck-check and optimiser statistics; accounting checks; loss limits
+  stages.py sample.py                  a strategy's five stages; the made-up Sample data market
   compute.py jobs.py                   the testing tools as plain functions; running them in workers
   data.py cache.py                     price data (Dukascopy, Yahoo, OANDA, CSV) and caching
   runner.py                            live checks: forward tests, alerts, price alerts, weekly report

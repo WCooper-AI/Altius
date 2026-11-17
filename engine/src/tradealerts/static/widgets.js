@@ -1,7 +1,7 @@
 /* Trading Alerts web interface: Shared pieces: loading placeholders, charts, the command palette, the notifications bell.
    ES modules: each file imports what it uses (boot.js is the page's entry, see web/app.py). */
 
-import { app, append, clear, GET, h, nf, POST, short, svg, toast, when } from "./util.js";
+import { app, append, clear, day, GET, h, nf, POST, short, svg, toast, when } from "./util.js";
 import { pref, savePref } from "./testing.js";
 import { effectiveTheme, setTheme } from "./settings.js";
 import { journalDialog, viewJournal } from "./journal.js";
@@ -555,4 +555,32 @@ export function every(seconds, fn) {
   const id = setInterval(() => { if (!document.hidden) fn(); }, seconds * 1000);
   app.timers.push(id);
   return id;
+}
+
+// --------------------------------------------------------------------- the five stages of a strategy
+
+/** Research → Backtest → Validate → Paper trade → Monitor: what's done, and the one next step.
+    `stages` is the block from /api/strategies/{id}; `go(key)` takes the reader to that stage's control.
+    The returned element has `update(stages)` for after a test or a status change. */
+export function stageStrip(stages, { go = null } = {}) {
+  const wrap = h("div", { class: "stages", role: "group", "aria-label": "Where this strategy is" });
+  const render = (st) => {
+    clear(wrap);
+    if (!st || !st.steps) return;
+    const list = h("ol", { class: "stage-list" }, st.steps.map((s, i) => {
+      const live = s.key === st.current && s.state !== "done";
+      const cls = "stage " + (s.state === "done" ? "done" : live ? "current" : "todo") + (s.changed ? " changed" : "");
+      return h("li", { class: cls, "aria-current": live ? "step" : null },
+        h("span", { class: "stage-mark", "aria-hidden": "true" }, s.state === "done" ? "✓" : String(i + 1)),
+        h("span", { class: "stage-text" }, h("strong", {}, s.label),
+          h("span", { class: "small muted" }, s.detail + (s.at ? ` · ${day(s.at)}` : ""))));
+    }));
+    const next = st.next || {};
+    const link = next.key && go ? h("a", { href: "#", onclick: (e) => { e.preventDefault(); go(next.key); } }, "Go there") : null;
+    append(wrap, [list, h("p", { class: "stage-next small" },
+      h("strong", {}, st.complete ? "All five stages done. " : "Next: "), next.text, link ? [" ", link] : null)]);
+  };
+  render(stages);
+  wrap.update = render;
+  return wrap;
 }

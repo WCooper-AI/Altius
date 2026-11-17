@@ -8,7 +8,7 @@ import { asGroup, choiceSelect, groupEditor, groupItems, newComparison, numberIn
 import { analysisPanel, pathSettings, pref, renderBacktest, savePref, setPath } from "./testing.js";
 import { instrumentLine, marketByKey } from "./guided.js";
 import { csvUploadButton, limits } from "./settings.js";
-import { sparkline } from "./widgets.js";
+import { sparkline, stageStrip } from "./widgets.js";
 import { refreshStatus, setNav } from "./boot.js";
 
 // --------------------------------------------------------------------- page: strategies list
@@ -54,6 +54,28 @@ function createMenu({ big = false, label = "Create strategy" } = {}) {
   return h("span", { class: "menu-wrap" + (big ? " start" : "") }, file, btn, menu);
 }
 
+/** "Try it with sample data": saves a ready-to-test draft on the built-in sample market (made-up
+    prices, nothing to download) and opens it, so the first backtest is one click away. */
+export function sampleButton(cls = "") {
+  const b = h("button", { type: "button", class: cls }, "Try it with sample data");
+  b.addEventListener("click", async () => {
+    b.disabled = true;
+    const r = await attempt(() => POST("/strategies/sample"));
+    b.disabled = false;
+    if (!r) return;
+    toast("Sample strategy saved as a draft. Next: test it on past prices");
+    location.hash = "#/s/" + r.id;
+  });
+  return b;
+}
+
+/** One line on where a strategy is, for the list: the stage to do next. */
+function stageLine(st) {
+  if (!st || st.complete) return null;
+  const cur = st.steps.find((s) => s.key === st.current);
+  return cur ? h("div", { class: "small muted" }, "Next: " + cur.label.toLowerCase()) : null;
+}
+
 export async function viewStrategies() {
   setNav("strategies");
   const page = h("div");
@@ -65,7 +87,8 @@ export async function viewStrategies() {
     append(page, [h("div", { class: "welcome" },
       h("h1", {}, "Test a trading idea, then get told when it happens"),
       h("p", { class: "lede" }, "Pick a market and an idea, try it on past prices, and turn on alerts if you like what you see. Nothing is traded for you, and every strategy starts as a draft."),
-      h("div", { class: "actions" }, createMenu({ big: true, label: "Create your first strategy" })))]);
+      h("div", { class: "actions" }, createMenu({ big: true, label: "Create your first strategy" }), sampleButton("big")),
+      h("p", { class: "small muted" }, "Sample data is made-up prices generated on this computer, so there's nothing to download and nothing it says applies to a real market."))]);
     return;
   }
 
@@ -149,7 +172,7 @@ export async function viewStrategies() {
           : h("p", { class: "small muted entry-line", title: partsText(describeStrategy(d)) }, "Entry: ", partsText(describeCondition(d.entry || {})))),
       h("td", { class: "nowrap" }, (d.market || {}).label || (d.market || {}).symbol || "–", h("div", { class: "small muted" }, (d.market || {}).timeframe || "")),
       h("td", { class: "status-cell" }, pill(st, st === "broken" ? "Needs fixing" : null),
-        run && run.health ? stateBadge(run.health) : null),
+        run && run.health ? stateBadge(run.health) : null, stageLine(it.stages)),
       ...(run ? [
         h("td", { class: "num" }, money(run.balance, sym), h("div", { class: "small muted" }, position)),
         h("td", { class: "num spark-cell" }, run.trades ? sparkline(it.spark, run.pnl >= 0 ? "gain" : "loss") : h("span", { class: "small muted" }, "No trades yet")),
@@ -230,7 +253,7 @@ export function historyLink(id) {
   return h("a", { class: "button quiet", href: "#/history/" + encodeURIComponent(id), title: "Earlier versions of this strategy" }, "History");
 }
 
-export async function viewEditor(id, exampleName, preloaded, run) {
+export async function viewEditor(id, exampleName, preloaded, run, stages = null) {
   setNav("strategies");
   let data, isNew = !id;
   if (preloaded) data = preloaded;
@@ -330,7 +353,22 @@ export async function viewEditor(id, exampleName, preloaded, run) {
   // ----- header: name, status, sentence
   const title = h("input", { class: "title-input", value: data.name || "", "aria-label": "Strategy name",
     oninput: (e) => { data.name = e.target.value; changed(); } });
-  const statusSeg = statusControls({ id, isNew, run, getData: () => data, isDirty: () => dirty, save });
+  const statusSeg = statusControls({ id, isNew, run, getData: () => data, isDirty: () => dirty, save, onChange: refreshStages });
+  // the five stages (Research → Backtest → Validate → Paper trade → Monitor) and the one next step; saved strategies only
+  const strip = isNew ? null : stageStrip(stages, { go: (key) => {
+    if (key === "backtest" || key === "validate") {
+      results.show(key === "backtest" ? "backtest" : "luck");
+      results.scrollIntoView({ block: "start", behavior: "smooth" });
+    } else {
+      statusSeg.scrollIntoView({ block: "center", behavior: "smooth" });
+      const b = statusSeg.querySelectorAll("button")[key === "monitor" ? 1 : 0];
+      if (b) b.focus();
+    }
+  } });
+  async function refreshStages() {
+    if (!strip) return;
+    try { strip.update((await GET("/strategies/" + encodeURIComponent(id))).stages); } catch (_) { /* keep what's shown */ }
+  }
   const deleteBtn = isNew ? null : h("button", { class: "danger", type: "button", onclick: async () => {
     if (!(await ask(`Delete "${data.name}"? Its forward test stops and it moves to the deleted strategies folder.`, { ok: "Delete", danger: true }))) return;
     if ((await attempt(() => DEL("/strategies/" + encodeURIComponent(id)))) === undefined) return;
@@ -356,7 +394,7 @@ export async function viewEditor(id, exampleName, preloaded, run) {
     title,
     h("div", { class: "row" }, h("div", { class: "inline" }, statusSeg, dirtyNote),
       h("div", { class: "inline" }, dupBtn, isNew ? null : historyLink(id), isNew ? null : shareButtons(id, exportData), deleteBtn, saveBtn)),
-    summary, validity);
+    summary, validity, strip);
 
   // ----- "Count signals on past data" badge (entry section)
   const signalBadge = h("span", { class: "signal-badge muted", "aria-live": "polite" });
@@ -434,12 +472,13 @@ export async function viewEditor(id, exampleName, preloaded, run) {
     return exportData();
   };
   rerender();
-  const right = h("div", { class: "side" }, analysisPanel({
-    getData: testable, render: renderBacktest, strategyId: isNew ? null : id,
+  const results = analysisPanel({
+    getData: testable, render: renderBacktest, strategyId: isNew ? null : id, onRan: refreshStages,
     intro: "Tests the rules as they are on screen, including unsaved changes, on the market's price history.",
     settings: () => pathSettings(data),
     apply: (setting, value) => { setPath(data, setting.path, value); changed(); rerender(); },
-  }));
+  });
+  const right = h("div", { class: "side" }, results);
 
   clear($main);
   append($main, [head, h("div", { class: "editor" }, left, right)]);

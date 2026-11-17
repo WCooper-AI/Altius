@@ -323,6 +323,7 @@ export function statusControls(o) {
           toast("Forward test started. Candles that close from now on are counted");
         }
         refreshStatus();
+        if (o.onChange) o.onChange();
       } catch (e) { toast(e.message, true); } finally { ft.disabled = false; render(); }
     });
     const al = h("button", { type: "button", class: "toggle", "aria-pressed": String(alertsOn),
@@ -341,6 +342,7 @@ export function statusControls(o) {
         try { run = await POST(`/strategies/${encodeURIComponent(o.id)}/forward-test/start`); run.candles = 0; } catch (_) { /* runner starts one */ }
       }
       refreshStatus();
+      if (o.onChange) o.onChange();
       render();
     });
     append(wrap, [ft, al, run ? h("span", { class: "small muted run-note" }, `Forward testing since ${when(run.started_at)}. `,

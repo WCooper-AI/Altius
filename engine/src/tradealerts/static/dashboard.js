@@ -5,7 +5,7 @@ import { $main, app, append, ask, attempt, clear, day, DEL, GET, h, money, num, 
 import { checksText, doingText, hhmm, marketText, positionText, reopenText, signedMoney, stateBadge, stateLine,
   statusOf } from "./describe.js";
 import { choiceSelect } from "./editor.js";
-import { viewStrategies } from "./strategies.js";
+import { sampleButton, viewStrategies } from "./strategies.js";
 import { lineChart, periodPicker, pref, savePref } from "./testing.js";
 import { undoable } from "./settings.js";
 import { candleChart, every } from "./widgets.js";
@@ -245,15 +245,19 @@ export async function viewDashboard() {
     h("div", {}, h("h1", {}, "Dashboard"), h("p", { class: "muted dash-lede" }, lede)),
     h("div", { class: "actions" }, starter))]);
 
-  // ----- getting started checklist (until it's done or dismissed)
+  // ----- getting started: the five stages, until every one has been reached or it's dismissed
+  const reached = (key) => list.strategies.some((x) => x.stages && x.stages.steps.some((s) => s.key === key && s.state === "done"));
+  const first = list.strategies[0] ? "#/s/" + list.strategies[0].id : "#/create";
+  const hasChannel = !!settings && Object.entries(settings.notifiers).some(([k, v]) => k !== "console" && v.enabled);
   const steps = [
-    ["Set up phone or email alerts", settings && Object.entries(settings.notifiers).some(([k, v]) => k !== "console" && v.enabled), "#/settings"],
     ["Create a strategy", list.strategies.length > 0, "#/create"],
-    ["Test it on past prices", pref("ta-did-backtest", "") === "1", list.strategies[0] ? "#/s/" + list.strategies[0].id : "#/create"],
-    ["Start a forward test", dash.running.length + dash.finished.length > 0, null],
+    ["Test it on past prices", reached("backtest") || pref("ta-did-backtest", "") === "1", first],
+    ["Check how much of the result could be luck", reached("validate"), first],
+    ["Start a forward test", dash.running.length + dash.finished.length > 0, first],
+    [hasChannel ? "Turn on alerts" : "Set up an alert channel, then turn on alerts", reached("monitor"), hasChannel ? first : "#/settings"],
   ];
   const done = steps.filter((x) => x[1]).length;
-  const nearlyDone = done >= 3;
+  const nearlyDone = done >= 4;
   if (done < steps.length && pref("ta-onboard-hidden", "") !== "1" && nearlyDone && pref("ta-onboard-open", "") !== "1") {
     const left = steps.find((x) => !x[1]);
     append(page, [h("div", { class: "panel onboard onboard-line" }, h("div", { class: "row-between" },
@@ -271,7 +275,9 @@ export async function viewDashboard() {
       h("div", { class: "progress" }, h("span", { class: "progress-fill" })),
       h("ol", { class: "steps-list" }, steps.map(([t, ok, href]) => h("li", { class: ok ? "done" : "" },
         h("span", { class: "step-check", "aria-hidden": "true" }, ok ? "✓" : ""),
-        ok || !href ? h("span", {}, t, ok ? h("span", { class: "sr-only" }, " (done)") : null) : h("a", { href }, t))))));
+        ok || !href ? h("span", {}, t, ok ? h("span", { class: "sr-only" }, " (done)") : null) : h("a", { href }, t)))),
+      reached("backtest") ? null : h("p", { class: "small muted" }, "Nothing to test yet? ", sampleButton("quiet small"),
+        " makes a draft on made-up prices, so there's nothing to download.")));
     card.querySelector(".progress-fill").style.width = `${(done / steps.length) * 100}%`;
     append(page, [card]);
   }

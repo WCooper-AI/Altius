@@ -5,6 +5,8 @@ Thanks for helping. Bug reports and pull requests are welcome.
 - Run `pytest engine/tests` before sending a change, and add a test for any bug you fix. If you changed the interface's JavaScript, also run `npm ci && npm run lint:js` from the repo root.
 - The web interface is plain JavaScript with no build step (`engine/src/tradealerts/static/`).
 - Keep wording in the interface plain and free of jargon; the app is for beginners too.
+- How the code fits together: [docs/architecture.md](docs/architecture.md). The rest of the
+  documentation is in [docs/](docs/README.md).
 
 **Contributor licence agreement.** By submitting a contribution you agree that it's your
 own work, that it's licensed under the AGPL-3.0, and that you also grant William Cooper a
