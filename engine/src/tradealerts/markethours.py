@@ -59,10 +59,13 @@ def exchange_closed_until(code: str, now: pd.Timestamp | None = None) -> tuple[p
                 return None
             nxt = pd.Timestamp(cal.next_open(now)).tz_convert("UTC")
             local = now.tz_convert(cal.tz)
+            # A weekday the exchange doesn't trade is a holiday even when it falls on a Friday
+            # (Good Friday, a Friday either side of Christmas, ...): check this before the Friday
+            # weekend heuristic below, which would otherwise call any closed Friday "weekend".
+            if local.day_of_week < 5 and not cal.is_session(local.normalize().tz_localize(None)):
+                return nxt, "holiday"
             if _over_weekend(local, nxt.tz_convert(cal.tz)):
                 return nxt, "weekend"
-            if not cal.is_session(local.normalize().tz_localize(None)):
-                return nxt, "holiday"
             return nxt, "outside exchange hours"
         except Exception:
             pass  # outside the calendar's date range: use the plain timetable
@@ -129,4 +132,30 @@ def closed_until(symbol: str, now: pd.Timestamp | None = None) -> tuple[pd.Times
     if ny.hour == 17:
         return ny.normalize().replace(hour=18).tz_convert("UTC"), "daily break"
     return None
+
+
+def session_notes(symbol: str) -> dict:
+    """Plain facts about when this market trades and how that was worked out, for the backtest
+    run record: ``hours`` is the plain-English trading hours, ``calendar`` is "exchange" (the
+    real exchange calendar, holidays included), "fallback" (a plain Monday-to-Friday timetable,
+    because the ``exchange_calendars`` package isn't installed) or None for a market that isn't
+    tied to one exchange's calendar, and ``weekend`` says how the weekend (and, for CFD-style
+    markets, the daily break) is handled."""
+    inst = instruments.get(symbol)
+    code = exchange_for(symbol)
+    if code:
+        hours = inst.hours if inst else instruments.EXCHANGE_HOURS.get(code, f"{code} exchange hours")
+        real = _calendar(code) is not None
+        calendar_text = ("the exchange's real trading calendar, holidays included" if real else
+                         "a plain Monday-to-Friday timetable (the exchange_calendars package isn't "
+                         "installed here, so exchange holidays aren't known)")
+        return {"hours": hours, "calendar": "exchange" if real else "fallback", "calendar_text": calendar_text,
+                "weekend": "Closed Saturday and Sunday, and exchange holidays" if real else
+                           "Closed Saturday and Sunday (exchange holidays aren't known without exchange_calendars)"}
+    if trades_24_7(symbol):
+        return {"hours": inst.hours if inst else "Every day, around the clock", "calendar": None,
+                "calendar_text": "Not tied to one exchange's calendar", "weekend": "Never closes"}
+    return {"hours": inst.hours if inst else "Almost 24 hours, Monday to Friday", "calendar": None,
+            "calendar_text": "Not tied to one exchange's calendar; treated as a CFD-style market",
+            "weekend": "Closed from Friday 17:00 to Sunday 18:00 New York time, and 17:00-18:00 New York each day"}
 

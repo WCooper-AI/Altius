@@ -70,12 +70,36 @@ the command line:
 | repaired | Candles whose high or low did not contain the open or close were widened when loaded |
 | disordered | Timestamps that went backwards or repeated |
 | frequency | Candles at a different spacing from the strategy's candle size |
-| jump | Unusual price jumps, such as a futures contract roll or a bad tick |
+| jump | An unusual price jump between candles, likely a bad tick |
+| roll | A step change on a futures symbol (ends `=F`), likely the contract rolling to the next one |
+| split | An overnight move close to a common stock-split ratio (2:1, 3:2, and so on); prices are not adjusted for it |
+| dividend | Small, regularly-spaced overnight drops on a stock, the pattern an unadjusted feed leaves on ex-dividend dates; prices are not adjusted for it |
 | timezone | Timestamps without a time zone |
 | spread | Candles without a spread when the file has a spread column |
 
+The split and dividend checks only look at the price: Altius never has a real corporate-actions
+calendar to confirm them, so they are reported as possibilities ("possible split"), never acted
+on, and no price is ever changed because of one.
+
 Every result also carries a fingerprint of the candles it ran on, so two runs can be checked
 against each other.
+
+## What "How this was tested" shows about the data source
+
+Every backtest's run record states, in plain terms, the price source's own characteristics —
+not settings you chose, but facts about where the candles came from:
+
+- **Price**: whether the candles are a mid price (from bid and ask), the last traded price, or
+  whatever a CSV file contains.
+- **Adjusted or not**: whether the feed already builds in stock splits and dividends (CFD and
+  FX feeds don't need to, since there's nothing to adjust) or shows the raw, unadjusted price.
+- **Spread data**: whether the feed has a real bid/ask spread per candle, or none.
+- **Typical history available**: roughly how far back that source's data goes.
+
+It also states the trading-hours assumption used for that market: the plain-English hours, how
+the weekend (and, for CFD-style markets, the daily 17:00–18:00 New York break) is handled, and
+whether that came from the real exchange calendar (holidays included) or the plain
+Monday-to-Friday fallback timetable used when `exchange_calendars` isn't installed.
 
 ## Exchange rates
 

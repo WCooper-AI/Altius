@@ -8,7 +8,11 @@ it). It never raises: bad input just means no warnings.
 `report(df, timeframe)` is the fuller record kept with every backtest: the checks above
 (except staleness, which only matters live), plus unusual jumps between candles,
 candles closer together than the candle size, the time zone, how many candles had a
-spread in the data, and a fingerprint of the prices so the same data can be recognised.
+spread in the data, a fingerprint of the prices so the same data can be recognised, and
+two things that look like jumps but have a specific, named cause: an overnight move close
+to a common stock-split ratio, or (on a futures symbol) a step change at what is probably
+a contract roll. Neither of these changes a single price: they are notes about data that
+is left exactly as the provider sent it.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ import hashlib
 import numpy as np
 import pandas as pd
 
-from . import timeframes
+from . import instruments, timeframes
 from .markethours import trades_24_7
 
 # a gap must be at least this many bars wide before it counts (one missing candle is normal noise)
@@ -29,6 +33,31 @@ STALE_BARS = 3
 ZERO_RUN = 5
 # above this many candles in one gap, estimate its weekday share instead of listing every candle
 EXACT_LIMIT = 50_000
+
+# Overnight price ratios (this candle's open over the one before's close) close enough to one of
+# these to be a stock split rather than an ordinary move, each with its plain-English phrase and
+# the ratio as people write it. An unadjusted feed shows a real split as almost exactly this jump,
+# because every later candle is on the new price scale.
+SPLIT_PHRASES: dict[float, tuple[str, str]] = {
+    0.5: ("fell to about half", "2:1"),
+    1 / 3: ("fell to about a third", "3:1"),
+    2 / 3: ("fell to about two-thirds", "3:2"),
+    0.25: ("fell to about a quarter", "4:1"),
+    0.2: ("fell to about a fifth", "5:1"),
+    2.0: ("roughly doubled", "1:2 reverse"),
+    3.0: ("roughly tripled", "1:3 reverse"),
+    1.5: ("rose to about one and a half times its level", "2:3 reverse"),
+    4.0: ("rose to about four times its level", "1:4 reverse"),
+    5.0: ("rose to about five times its level", "1:5 reverse"),
+}
+SPLIT_TOL = 0.04  # relative tolerance: a real split lands almost exactly on the ratio
+
+DIVIDEND_GAP = (0.001, 0.05)   # a 0.1%-5% overnight drop is the size of a typical cash dividend
+DIVIDEND_Z = 3.5                # ...and clearly bigger than this market's own ordinary overnight moves
+DIVIDEND_MIN_HITS = 3           # at least this many similarly-spaced drops before it's called a pattern
+DIVIDEND_PERIOD_TOL = 0.35      # the gap between them may vary by this fraction and still count as regular
+# plausible days between one dividend-sized drop and the next: quarterly, half-yearly, yearly
+DIVIDEND_PERIODS_DAYS = ((75, 100), (160, 200), (340, 390))
 
 
 def _utc(t) -> pd.Timestamp:
@@ -155,6 +184,89 @@ def check(df: pd.DataFrame, timeframe: str, now=None, symbol: str = "") -> list[
     return out
 
 
+def _is_stock(symbol: str) -> bool:
+    """Corporate actions (splits, dividends) only happen on shares: CFDs, FX and crypto don't
+    split or pay a dividend. A built-in market says so directly; a custom symbol is guessed from
+    the usual Yahoo-style naming (``=F`` futures, ``=X`` FX pairs, ``BTC-USD`` style crypto
+    pairs) and otherwise treated as a possible stock, since shares have no distinguishing mark."""
+    inst = instruments.get(symbol)
+    if inst is not None:
+        return inst.group == "Stocks"
+    sym = (symbol or "").upper()
+    return not (sym.endswith("=F") or sym.endswith("=X") or "-" in sym)
+
+
+def _is_futures(symbol: str) -> bool:
+    """True for a Yahoo-style futures ticker (ends ``=F``): checked on the built-in instrument's
+    own symbol field, or the raw symbol for a custom market."""
+    inst = instruments.get(symbol)
+    sym = inst.symbol if inst is not None else (symbol or "")
+    return sym.upper().endswith("=F")
+
+
+def _overnight_ratio(df: pd.DataFrame, bar: pd.Timedelta) -> pd.Series:
+    """This candle's open divided by the close of the candle before it, but only where the
+    candle before could plausibly be the previous session's close: every row for daily-or-longer
+    candles, or just the first candle after a break for anything finer. Without that limit,
+    ordinary candle-to-candle noise on intraday data would look like a split or a dividend purely
+    by chance, since many small moves land in the same range over hundreds of candles."""
+    prev_close = df["close"].shift(1)
+    ratio = df["open"] / prev_close
+    if bar < pd.Timedelta(days=1):
+        step = df.index.to_series().diff()
+        ratio = ratio[step > bar]
+    return ratio.replace([np.inf, -np.inf], np.nan).dropna()
+
+
+def find_splits(df: pd.DataFrame, bar: pd.Timedelta) -> list[tuple[pd.Timestamp, float, float]]:
+    """Overnight ratios close to a common split ratio: a list of (when, actual ratio, matched
+    ratio). An ordinary move practically never lands within a few percent of exactly 2, 3, 0.5
+    and so on, so this rarely fires by chance."""
+    out = []
+    for t, r in _overnight_ratio(df, bar).items():
+        if not np.isfinite(r) or r <= 0 or abs(r - 1) < 0.2:
+            continue  # ordinary moves never get close to halving, doubling, and so on
+        nearest = min(SPLIT_PHRASES, key=lambda s: abs(r - s) / s)
+        if abs(r - nearest) / nearest <= SPLIT_TOL:
+            out.append((t, float(r), nearest))
+    return out
+
+
+def find_dividend_gaps(df: pd.DataFrame, bar: pd.Timedelta, symbol: str) -> list[tuple[pd.Timestamp, float]]:
+    """Small, regularly-spaced overnight drops on a stock: the signature an unadjusted feed
+    leaves on an ex-dividend date. A single small drop could be anything (ordinary noise, news),
+    and on a volatile stock an ordinary down day often falls in the same size range purely by
+    chance, so this only counts a drop that is both dividend-sized *and* clearly bigger than this
+    market's own typical overnight move, and only reports when at least three of those are spaced
+    about as regularly as quarterly, half-yearly or yearly dividends usually are. That makes it
+    cautious: a real but small or irregular dividend may go unreported rather than risk a false
+    "possible dividend" on ordinary noise."""
+    if not _is_stock(symbol):
+        return []
+    ratio = _overnight_ratio(df, bar)
+    if len(ratio) < 30:
+        return []
+    # a robust (outlier-resistant) measure of this market's typical overnight move, so the test
+    # is relative to its own volatility rather than one fixed percentage for every stock
+    typical_move = float((ratio - 1).abs().median()) * 1.4826 + 1e-12
+    lo, hi = 1 - DIVIDEND_GAP[1], 1 - DIVIDEND_GAP[0]
+    sized = (ratio >= lo) & (ratio <= hi)
+    unusual = (1 - ratio) > DIVIDEND_Z * typical_move
+    hits = ratio[sized & unusual]
+    if len(hits) < DIVIDEND_MIN_HITS:
+        return []
+    spacing_days = hits.index.to_series().diff().dropna().dt.total_seconds() / 86400
+    if spacing_days.empty:
+        return []
+    typical = spacing_days.median()
+    if not any(lo_d <= typical <= hi_d for lo_d, hi_d in DIVIDEND_PERIODS_DAYS):
+        return []  # not spaced like quarterly, half-yearly or yearly dividends: too likely a coincidence
+    regular = spacing_days[(spacing_days >= typical * (1 - DIVIDEND_PERIOD_TOL)) & (spacing_days <= typical * (1 + DIVIDEND_PERIOD_TOL))]
+    if len(regular) < DIVIDEND_MIN_HITS - 1:
+        return []
+    return [(t, float(r)) for t, r in hits.items()]
+
+
 def fingerprint(df: pd.DataFrame) -> str:
     """A short code for the candles themselves (times, prices and any spread): the same
     data gives the same code on any machine, and any changed candle gives a new one."""
@@ -194,9 +306,32 @@ def report(df: pd.DataFrame, timeframe: str, symbol: str = "") -> dict:
     jumps = find_jumps(df, timeframe)
     if len(jumps):
         worst = jumps["gap"].idxmax()
-        issues.append({"kind": "jump", "count": int(len(jumps)),
-                       "text": (f"{len(jumps)} unusual jump{'s' if len(jumps) != 1 else ''} between candles, the "
-                                f"largest on {_fmt(worst)} UTC. Often a futures roll or a bad tick.")})
+        if _is_futures(symbol):
+            issues.append({"kind": "roll", "count": int(len(jumps)),
+                           "text": (f"{len(jumps)} step change{'s' if len(jumps) != 1 else ''} between candles, the "
+                                    f"largest on {_fmt(worst)} UTC. This symbol is a futures contract, so this is "
+                                    "likely a contract roll (the contract behind the price changed), not a bad tick.")})
+        else:
+            issues.append({"kind": "jump", "count": int(len(jumps)),
+                           "text": (f"{len(jumps)} unusual jump{'s' if len(jumps) != 1 else ''} between candles, the "
+                                    f"largest on {_fmt(worst)} UTC. Often a futures roll or a bad tick.")})
+    splits = find_splits(df, bar)
+    if splits:
+        t, r, matched = max(splits, key=lambda s: abs(np.log(s[1])))  # the most extreme ratio
+        phrase, label = SPLIT_PHRASES[matched]
+        issues.append({"kind": "split", "count": len(splits),
+                       "text": (f"{len(splits)} overnight move{'s' if len(splits) != 1 else ''} close to a common "
+                                f"split ratio, the largest on {_fmt(t)} UTC (prices {phrase} overnight) — possibly "
+                                f"a {label} split. This data is not adjusted for it; a split changes the price scale "
+                                "but not what actually happened at the time.")})
+    dividends = find_dividend_gaps(df, bar, symbol)
+    if dividends:
+        worst = min(dividends, key=lambda d: d[1])
+        issues.append({"kind": "dividend", "count": len(dividends),
+                       "text": (f"{len(dividends)} small, regularly-spaced overnight drops, the kind an unadjusted "
+                                "feed leaves on a stock's ex-dividend date; the largest on "
+                                f"{_fmt(worst[0])} UTC (down {(1 - worst[1]) * 100:.1f}% overnight). "
+                                "This data is not adjusted for it.")})
     if "spread" in df.columns:
         pct = float(df["spread"].notna().mean() * 100)
         out["spread_coverage_pct"] = pct

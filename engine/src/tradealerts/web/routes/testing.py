@@ -9,7 +9,9 @@ from fastapi import APIRouter, Body, Depends, Request
 
 from ... import __version__, analysis, compute, stages, versions
 from ...backtest import MAX_SPLIT_PCT, MIN_SPLIT_PCT
+from ...data import provider_facts
 from ...jobs import Busy
+from ...markethours import session_notes
 from ...recipes import RecipeError, build_strategy
 from ...strategy import ID_RE, read_raw, strategy_from_dict
 from ...workspace import Workspace
@@ -144,6 +146,8 @@ def stamp(ws: Workspace, s, body: dict, metrics: dict, out: dict | None = None) 
         "data_fingerprint": out.get("data_fingerprint"),
         "data_candles": out.get("data_candles"),
         "data_checks": (out.get("data_quality") or {}).get("counts"),
+        "provider_facts": provider_facts(s.market.symbol, s.market.provider, ws.config().data),
+        "session": session_notes(s.market.symbol),
         "tested_at": now_iso(),
     }
 

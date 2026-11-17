@@ -70,6 +70,8 @@ def normalise(df: pd.DataFrame, assume_tz: str = "UTC") -> pd.DataFrame:
     df = df.astype(float)
     if not np.isfinite(df[OHLCV].to_numpy()).all():
         raise DataError("Price data contains non-finite (infinite) OHLCV values.")
+    if not (df[["open", "high", "low", "close"]].to_numpy() > 0).all():
+        raise DataError("Price data contains a zero or negative open/high/low/close price.")
     if not (df["volume"] >= 0).all():
         raise DataError("Price data contains negative volume.")
     if "spread" in df.columns:
@@ -124,7 +126,15 @@ def resample_ohlcv(df: pd.DataFrame, timeframe: str, alignment: str = DEFAULT_AL
         else:
             offset = pd.Timedelta(hours=start_hour % hours)
         rule = f"{int(round(hours))}h"  # fixed-length hours, so the offset applies to daily candles too
-        out = local.resample(rule, label="left", closed="left", origin="start_day", offset=offset).agg(agg)
+        # Resample on the local wall clock, not the tz-aware instant: pandas bins a tz-aware index
+        # by fixed elapsed time, so a daylight-saving change would permanently shift every later
+        # candle's local start time by an hour (17:00 New York drifting to 18:00, say). Stripping
+        # the time zone first keeps the bin edges pinned to the same wall-clock hour every day.
+        naive = local.tz_localize(None)
+        out = naive.resample(rule, label="left", closed="left", origin="start_day", offset=offset).agg(agg)
+        # The transition day itself has one bin edge that either repeats (fall back) or doesn't
+        # exist (spring forward); pick the standard-time side and the next real instant for those.
+        out.index = out.index.tz_localize(tz, ambiguous=False, nonexistent="shift_forward")
         out = out.tz_convert("UTC")
     else:
         out = df.resample(timeframes.to_pandas_rule(timeframe), label="left", closed="left",
@@ -209,17 +219,24 @@ class CSVProvider(Provider):
                 raise DataError(f"CSV files must be inside the data folder ({self.allowed_root})")
         if not p.exists():
             raise DataError(f"CSV file not found: {p}")
-        raw = pd.read_csv(p)
+        try:
+            raw = pd.read_csv(p)
+        except Exception as exc:  # malformed CSV (ragged rows, bad quoting, wrong encoding, ...)
+            raise DataError(f"Couldn't read {p.name} as a CSV file: {exc}") from None
         cols = {c.lower().strip(): c for c in raw.columns}
         time_col = next((cols[c] for c in self.TIME_COLUMNS if c in cols), None)
         if time_col is None:
             raise DataError(f"{p} needs a time column named one of: {', '.join(self.TIME_COLUMNS)}")
         t = raw[time_col]
-        if pd.api.types.is_numeric_dtype(t):
-            unit = "ms" if t.abs().max() > 1e11 else "s"
-            idx = pd.to_datetime(t, unit=unit, utc=True)
-        else:
-            idx = pd.to_datetime(t, utc=False)
+        try:
+            if pd.api.types.is_numeric_dtype(t):
+                unit = "ms" if t.abs().max() > 1e11 else "s"
+                idx = pd.to_datetime(t, unit=unit, utc=True)
+            else:
+                idx = pd.to_datetime(t, utc=False)
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise DataError(f"{p.name} has a row in its time column that isn't a valid date or "
+                            f"timestamp: {exc}") from None
         raw = raw.drop(columns=[time_col])
         raw.index = pd.DatetimeIndex(idx)
         return normalise(raw, assume_tz=self.tz)
@@ -732,6 +749,59 @@ def provider_for(cfg, name: str, tz: str = "UTC") -> Provider:
 
 SAMPLE_NOTE = ("These are made-up prices generated on this computer so you can try the tool. "
                "They are not a real market, and results on them say nothing about any real market.")
+
+# Plain facts about each price-data source that don't depend on which market or strategy is using
+# it: shown in every backtest's "How this was tested" record and in docs/data-providers.md, kept
+# here once so the two stay in sync. ``spread_available`` is None when it depends on the file.
+PROVIDER_FACTS: dict[str, dict] = {
+    "dukascopy": {
+        "price": "Mid price, built from the feed's own separate bid and ask candles",
+        "adjusted": "Not adjusted for stock splits or dividends (these are CFD-style instruments, "
+                    "so corporate actions don't apply to the price)",
+        "spread_available": True,
+        "history": "Several years for most markets; the first download is slow, later ones only fetch new candles",
+    },
+    "yahoo": {
+        "price": "Last traded price; Yahoo's feed has no bid or ask",
+        "adjusted": "Unadjusted (the raw close, not the dividend- and split-adjusted close); a real "
+                    "split or dividend shows up as a jump in the price",
+        "spread_available": False,
+        "history": "About 2 years of hourly candles, about 60 days below 1 hour, longer for daily candles",
+    },
+    "oanda": {
+        "price": "Mid price, built from the broker's own bid and ask candles",
+        "adjusted": "Not adjusted for stock splits or dividends (CFD/FX instruments, so corporate "
+                    "actions don't apply to the price)",
+        "spread_available": True,
+        "history": "As far back as OANDA's API serves for that instrument",
+    },
+    "csv": {
+        "price": "Whatever the file's own open/high/low/close columns contain",
+        "adjusted": "Unknown: depends on how the file was produced",
+        "spread_available": None,
+        "history": "Whatever the file covers",
+    },
+    "sample": {
+        "price": "A made-up mid price; there is no real market behind it",
+        "adjusted": "Not applicable (not a real market)",
+        "spread_available": False,
+        "history": "A fixed made-up series generated on this computer",
+    },
+}
+
+
+def provider_facts(symbol: str, provider: str, data_cfg: dict | None = None) -> dict:
+    """Plain facts about the price source for a market (see ``PROVIDER_FACTS``): price
+    definition, whether it's adjusted for corporate actions, whether spread data is available,
+    and its usual history coverage. Resolved the same way as ``data_notes``, including "auto"
+    markets and the sample market."""
+    data_cfg = data_cfg or {}
+    source = data_cfg.get("source", "dukascopy") if provider == "auto" else provider
+    if provider == "auto":
+        from .recipes import MARKETS_BY_KEY
+        if MARKETS_BY_KEY.get(symbol, {}).get("sample"):
+            return dict(PROVIDER_FACTS["sample"], source="sample")
+    return dict(PROVIDER_FACTS.get(source, PROVIDER_FACTS["csv"]), source=source)
 
 
 def data_notes(symbol: str, provider: str, data_cfg: dict | None = None) -> list[str]:
