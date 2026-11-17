@@ -93,9 +93,20 @@ command line can also create and validate files: `tradealerts new`, `tradealerts
 
 ## Testing strategies together
 
-*Strategies → Compare* runs several strategies over the same period and lines up their
-metrics. *Test together* (the portfolio page) combines them on one balance: the combined
+*Strategies → Compare* backtests two to four strategies over the same fixed dates and lines up
+their metrics, with a Change column when there are two; nothing is marked best or worst. Under
+*Make the same for all* you can copy the market (each keeps its own candle size), the starting
+balance and risk rules, or the costs from one of them to the others; every setting changed to
+match is listed under the results. A spread or slippage in price points stays as it was on a
+different market, because the same number of points is a different amount there.
+
+*Test together* (the portfolio page) combines them on one balance: the combined
 curve, each strategy's share of the profit, how much was at risk at once, by-market exposure,
-how alike their daily results are, and a diversification figure. Weighting can be equal,
-inverse volatility or custom. The **shared account** replays the trades on one compounding
-balance with caps on open trades, open risk and margin, and reports what was skipped.
+how alike their daily results are, and a diversification figure. *Combined risk* adds the
+combined balance's worst fall (depth, dates, time to get back) and longest time below a high,
+its daily and yearly volatility, the largest shares of risk and profit, an effective number of
+strategies, and for each strategy its share of the day-to-day variance and of the worst fall.
+Weighting can be equal, inverse volatility or custom. The **shared account** replays the trades
+on one compounding balance with caps on open trades, open risk and margin, and reports what was
+skipped. The journal's breakdown also splits closed trades by market and by linked strategy, and
+lists the trades open now by market.

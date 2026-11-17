@@ -253,8 +253,10 @@ def portfolio(parts: list[tuple[str, str, BacktestResult]], balance: float,
         c = daily.loc[:, daily.std() > 0].corr()
         corr = {"ids": list(c.columns), "values": [[None if pd.isna(x) else float(x) for x in row] for row in c.to_numpy()]}
     exposure = _exposure(per, aligned, open_events, grid, daily, corr)
+    risk = portfolio_risk(per, aligned, equity, daily, balance)
     return {
         "per_strategy": per,
+        "risk": risk,
         "equity": equity,
         "drawdown": dd,
         "open_risk": open_risk,
@@ -339,6 +341,88 @@ def _exposure(per: list[dict], aligned: pd.DataFrame, open_events: list[tuple], 
         "time_in_market_pct": float((open_trades > 0).mean() * 100),
         "avg_correlation": avg_corr,
         "diversification_ratio": div_ratio,
+    }
+
+
+def _longest_below_high(equity: pd.Series, start_equity: float) -> dict | None:
+    """The longest stretch the balance spent below its previous high (the opening balance counts
+    as one), from the last moment at the high to the moment it got back, or the end of the test."""
+    peak = equity.cummax().clip(lower=start_equity).to_numpy(dtype=float)
+    under = equity.to_numpy(dtype=float) < peak - 1e-9 * max(1.0, abs(start_equity))
+    if not under.any():
+        return None
+    edges = np.diff(np.concatenate([[0], under.astype(np.int8), [0]]))
+    idx, n, best = equity.index, len(equity), None
+    for s, e in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)):
+        a, b = idx[max(s - 1, 0)], idx[min(e, n - 1)]
+        days = float((b - a) / pd.Timedelta(days=1))
+        if best is None or days > best["days"]:
+            best = {"days": days, "from": str(a), "to": str(b), "recovered": bool(e < n)}
+    return best
+
+
+def portfolio_risk(per: list[dict], aligned: pd.DataFrame, equity: pd.Series, daily: pd.DataFrame,
+                   balance: float) -> dict:
+    """Risk of the combined balance, and how much of it each strategy brought. Adds
+    ``daily_swing_pct``, ``risk_share_pct``, ``drawdown_pnl`` and ``drawdown_share_pct`` to each
+    entry of ``per`` (after :func:`_exposure`, which sets ``contribution_pct``).
+
+    * Combined drawdown: the deepest fall of the combined balance from a high, with its dates and
+      lengths (:func:`measures.worst_drawdown`), and the longest stretch spent below a high.
+    * Volatility: the standard deviation of the combined balance's daily % changes (calendar days,
+      weekends included), and that times the square root of 365.25 for a year.
+    * Risk share: each strategy's part of the variance of the combined daily profit,
+      cov(strategy, total) / var(total). The shares add up to 100%; a strategy whose days tend to
+      offset the others' has a negative share.
+    * Drawdown share: each strategy's profit or loss from the high before the worst drawdown to
+      its low, as a share of the combined fall. These add up to 100% too; a negative share means
+      that strategy made money while the balance fell.
+    * Concentration: the largest risk share, the largest share of the profit, and the effective
+      number of strategies, 1 / sum(s²) where s is each strategy's share of all the strategies'
+      own daily swings added up. It equals the number of strategies when each swings by the same
+      amount and falls towards 1 as one strategy's swings outweigh the rest.
+    """
+    from . import measures
+
+    worst = measures.worst_drawdown(equity, balance)
+    changes = measures.period_changes(equity, "D")
+    vol = float(changes.std()) if len(changes) > 2 else None
+    total = daily.sum(axis=1)
+    var = float(total.var()) if len(total) > 2 else 0.0
+    for p in per:
+        col = daily[p["id"]] if p["id"] in daily else pd.Series(0.0, index=daily.index)
+        sd = float(col.std()) if len(col) > 2 else float("nan")
+        p["daily_swing_pct"] = sd / balance * 100 if math.isfinite(sd) else None
+        p["risk_share_pct"] = float(col.cov(total) / var * 100) if var > 0 else None
+        p["drawdown_pnl"], p["drawdown_share_pct"] = 0.0, None
+    if worst:
+        a, b = pd.Timestamp(worst["peak"]), pd.Timestamp(worst["trough"])
+        moves = {p["id"]: float(aligned[p["id"]].loc[b] - aligned[p["id"]].loc[a]) for p in per if p["id"] in aligned}
+        fall = sum(moves.values())
+        for p in per:
+            p["drawdown_pnl"] = moves.get(p["id"], 0.0)
+            p["drawdown_share_pct"] = p["drawdown_pnl"] / fall * 100 if fall < 0 else None
+    swings = [p["daily_swing_pct"] or 0.0 for p in per]
+    spread = sum(swings)
+    effective = 1.0 / sum((s / spread) ** 2 for s in swings) if spread > 0 else None
+
+    def largest(key: str) -> dict | None:
+        rows = [p for p in per if p.get(key) is not None]
+        if not rows:
+            return None
+        top = max(rows, key=lambda p: p[key])
+        return {"id": top["id"], "name": top["name"], "pct": float(top[key])}
+
+    return {
+        "worst_drawdown": worst,
+        "longest_below_high": _longest_below_high(equity, balance),
+        "daily_volatility_pct": vol,
+        "yearly_volatility_pct": vol * math.sqrt(365.25) if vol is not None else None,
+        "days": int(len(changes)),
+        "largest_risk_share": largest("risk_share_pct"),
+        "largest_profit_share": largest("contribution_pct") if sum(p["pnl"] for p in per) > 0 else None,
+        "effective_strategies": effective,
+        "strategies": len(per),
     }
 
 
@@ -497,8 +581,10 @@ def shared_account(parts: list[tuple[str, str, BacktestResult]], balance: float,
         c = daily.loc[:, daily.std() > 0].corr()
         corr = {"ids": list(c.columns), "values": [[None if pd.isna(x) else float(x) for x in row] for row in c.to_numpy()]}
     exposure = _exposure(per_list, aligned, open_events, grid, daily, corr)
+    risk = portfolio_risk(per_list, aligned, equity_s, daily, balance)
     return {
         "per_strategy": per_list,
+        "risk": risk,
         "equity": equity_s,
         "drawdown": dd,
         "open_risk": open_risk_s,

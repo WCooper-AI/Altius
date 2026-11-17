@@ -84,8 +84,12 @@ was tested"), so the same test can be run again and give the same answer: engine
 fingerprint of the rules and the saved version they match, market, symbol and data source,
 candle size, the period actually covered, where fill prices and the spread came from, every
 cost and sizing setting, the train/test split, the random seed, a fingerprint of the candles,
-and the data-quality findings on them. `tradealerts check-data` reports the same findings
-from the command line.
+and the data-quality findings on them. It also keeps the strategy's name and its rules, a
+version code for each indicator the rules read (worked out from that indicator's code and the
+helpers it calls, so a change to how an indicator is calculated changes its code), the period
+as it was asked for, the time zones in use and the Python, pandas and numpy versions.
+*Download run record* saves all of it as a JSON file. `tradealerts check-data` reports the
+same data findings from the command line.
 
 ## Accounting checks
 
