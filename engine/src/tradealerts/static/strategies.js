@@ -4,9 +4,11 @@
 import { $main, app, append, ask, attempt, choose, clear, clone, CURRENCY, day, DEL, GET, h, money, POST, PUT, toast } from "./util.js";
 import { describeCondition, describeStrategy, displayStatus, isBlank, partsText, pill, positionText, renderParts,
   shareButtons, signedMoney, stateBadge, statusControls } from "./describe.js";
-import { asGroup, choiceSelect, groupEditor, groupItems, newComparison, numberInput, operandEditor, tzInput } from "./editor.js";
+import { asGroup, choiceSelect, groupEditor, newComparison, numberInput, operandEditor, tzInput } from "./editor.js";
+import { groupItems } from "./nodegraph.js";
 import { analysisPanel, pathSettings, pref, renderBacktest, savePref, setPath } from "./testing.js";
 import { instrumentLine, marketByKey } from "./guided.js";
+import { nodeView } from "./nodes.js";
 import { csvUploadButton, limits } from "./settings.js";
 import { sparkline, stageStrip } from "./widgets.js";
 import { refreshStatus, setNav } from "./boot.js";
@@ -446,15 +448,44 @@ export async function viewEditor(id, exampleName, preloaded, run, stages = null)
 
   // ----- sections
   const left = h("div", { class: "panel" });
+  const editorGrid = h("div", { class: "editor" }, left);
+  const nodeState = {}; // keeps the node view's graph alive across rerenders (outside rerender on purpose)
+  const narrowQuery = window.matchMedia("(max-width: 767px)");
+  const onNarrowChange = () => rerender();
+  narrowQuery.addEventListener("change", onNarrowChange);
+  app.cleanups.push(() => narrowQuery.removeEventListener("change", onNarrowChange));
   function rerender() {
     clear(left);
-    const jump = h("nav", { class: "section-nav", "aria-label": "Sections" });
+    const narrow = narrowQuery.matches;
+    const mode = !narrow && pref("ta-strategy-view", "list") === "nodes" ? "nodes" : "list";
+    editorGrid.classList.toggle("nodes-mode", mode === "nodes");
     const onEdit = () => { changed(); if (yamlOpen) { clearTimeout(yamlTimer); yamlTimer = setTimeout(refreshYaml, 300); } };
-    append(left, [jump,
+    const entryTools = h("div", { class: "inline" }, h("button", { type: "button", onclick: countSignals }, "Count signals on past data"), signalBadge);
+    // One bar along the top of the panel: section links (list view) on the left, the List | Nodes switch on the right.
+    const jump = h("nav", { class: "section-nav", "aria-label": "Sections" });
+    const bar = h("div", { class: "editor-bar" }, jump);
+    if (!narrow) {
+      const toggle = h("div", { class: "segmented view-toggle", role: "group", "aria-label": "View" });
+      for (const [key, label] of [["list", "List"], ["nodes", "Nodes"]]) {
+        toggle.appendChild(h("button", { type: "button", "aria-pressed": String(mode === key),
+          onclick: () => { savePref("ta-strategy-view", key); rerender(); } }, label));
+      }
+      bar.appendChild(toggle);
+    }
+    left.appendChild(bar);
+    if (mode === "nodes") {
+      jump.appendChild(h("span", { class: "bar-title" }, "Strategy map"));
+      append(left, [nodeView({
+        data, onEdit, storeKey: isNew ? null : "ta-nodes:" + id, state: nodeState,
+        sections: { market: marketSection, risk: riskSection, exitFields }, entryTools,
+      }), h("section", { class: "section" }, h("h2", {}, "Advanced"), yamlToggle, yamlWrap)]);
+      return;
+    }
+    append(left, [
       marketSection(data, onEdit),
       h("section", { class: "section" }, h("h2", {}, "Entry"),
         h("p", { class: "section-note" }, "Checked when each candle closes. If the rules are true, you get an alert and a paper trade opens at the next candle's open."),
-        h("div", { class: "inline" }, h("button", { type: "button", onclick: countSignals }, "Count signals on past data"), signalBadge),
+        entryTools,
         groupEditor(() => data.entry, (v) => { data.entry = v; }, onEdit)),
       exitSection(data, onEdit),
       riskSection(data, onEdit),
@@ -463,7 +494,11 @@ export async function viewEditor(id, exampleName, preloaded, run, stages = null)
       const title = sec.querySelector("h2");
       if (!title) return;
       sec.id = "sec-" + i;
-      jump.appendChild(h("a", { href: "#", onclick: (e) => { e.preventDefault(); sec.scrollIntoView({ behavior: "smooth", block: "start" }); } }, title.textContent));
+      jump.appendChild(h("a", { href: "#", onclick: (e) => {
+        e.preventDefault();
+        left.style.setProperty("--editor-bar-h", bar.offsetHeight + "px"); // the bar may wrap onto two lines
+        sec.scrollIntoView({ behavior: "smooth", block: "start" });
+      } }, title.textContent));
     });
   }
   const testable = () => {
@@ -479,9 +514,10 @@ export async function viewEditor(id, exampleName, preloaded, run, stages = null)
     apply: (setting, value) => { setPath(data, setting.path, value); changed(); rerender(); },
   });
   const right = h("div", { class: "side" }, results);
+  editorGrid.appendChild(right);
 
   clear($main);
-  append($main, [head, h("div", { class: "editor" }, left, right)]);
+  append($main, [head, editorGrid]);
   changed();
   dirty = isNew;
   dirtyNote.textContent = isNew ? "Not saved yet" : "";
@@ -716,6 +752,19 @@ function levelEditor(get, set, kinds, changed, label) {
   return wrap;
 }
 
+/** The stop loss, take profit and max-bars fields: shared between the list view's Exit section and the node
+    view's Exit node. */
+function exitFields(data, changed) {
+  const ex = data.exit;
+  return h("div", { class: "fields" },
+    h("div", { class: "field full" }, h("label", {}, "Stop loss"),
+      levelEditor(() => ex.stop, (v) => { ex.stop = v; }, STOP_KINDS, changed, "Stop loss")),
+    h("div", { class: "field full" }, h("label", {}, "Take profit"),
+      levelEditor(() => ex.target, (v) => { ex.target = v; }, TARGET_KINDS, changed, "Take profit")),
+    h("div", { class: "field" }, h("label", {}, "Close after this many candles"),
+      numberInput(ex.max_bars, (n) => { ex.max_bars = n; changed(); }, { step: "1", min: "1", integer: true, allowEmpty: true })));
+}
+
 function exitSection(data, changed) {
   const ex = data.exit;
   const whenBox = h("div");
@@ -731,13 +780,7 @@ function exitSection(data, changed) {
   renderWhen();
   return h("section", { class: "section" }, h("h2", {}, "Exit"),
     h("p", { class: "section-note" }, "If the stop and target are both hit in the same candle, the backtest counts it as a stop."),
-    h("div", { class: "fields" },
-      h("div", { class: "field full" }, h("label", {}, "Stop loss"),
-        levelEditor(() => ex.stop, (v) => { ex.stop = v; }, STOP_KINDS, changed, "Stop loss")),
-      h("div", { class: "field full" }, h("label", {}, "Take profit"),
-        levelEditor(() => ex.target, (v) => { ex.target = v; }, TARGET_KINDS, changed, "Take profit")),
-      h("div", { class: "field" }, h("label", {}, "Close after this many candles"),
-        numberInput(ex.max_bars, (n) => { ex.max_bars = n; changed(); }, { step: "1", min: "1", integer: true, allowEmpty: true }))),
+    exitFields(data, changed),
     h("div", { class: "stack", style: null }, h("label", { class: "check", for: "exit-when" }, toggle, "Also close the trade when a rule is true"), whenBox));
 }
 

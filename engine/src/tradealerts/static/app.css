@@ -1574,3 +1574,77 @@ table, td, th, .num, .price, .pnl, .countdown, time, .stat, .stat-value, .chip-c
   .timeline-ticks span:last-child { display: inline; }
   .session-band { font-size: .62rem; padding: 0 .25rem; }
 }
+
+/* ================================================================== node view (strategy editor, canvas mode) */
+
+/* The panel's top bar: section links on the left, List | Nodes on the right; sticky as one piece. */
+.editor-bar { position: sticky; top: 3.5rem; z-index: 5; display: flex; align-items: center; gap: .75rem;
+  padding: .4rem .75rem .4rem 0; background: var(--surface); border-bottom: 1px solid var(--line); }
+.editor-bar .section-nav { position: static; flex: 1; min-width: 0; border-bottom: 0; background: none; padding-right: 0; }
+.editor-bar .bar-title { font-size: var(--text-sm); font-weight: 600; color: var(--ink); padding: .3rem .7rem; }
+.view-toggle { flex: none; margin: 0; }
+/* Jumping to a section stops below the page header (3.5rem) and this sticky bar, not underneath them. */
+.editor-bar ~ section { scroll-margin-top: calc(3.5rem + var(--editor-bar-h, 3rem) + .75rem); }
+.view-toggle button { padding-block: .25rem; font-size: var(--text-sm); }
+.editor.nodes-mode { grid-template-columns: minmax(0, 1fr); }
+.editor.nodes-mode .side { position: static; }
+@media (max-width: 767px) { .view-toggle { display: none; } }
+
+.node-editor { padding: 0 1.5rem 1.5rem; display: grid; gap: .6rem; }
+.node-toolbar { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.node-toolbar select { max-width: 13rem; }
+.node-hint { color: var(--muted); font-size: var(--text-sm); margin: 0; }
+.node-stage { position: relative; }
+
+.node-canvas {
+  position: relative; overflow: hidden; touch-action: none; border-radius: var(--radius-lg);
+  border: 1px solid var(--line); background: var(--chart-bg); height: clamp(520px, 72vh, 900px); cursor: grab;
+}
+.node-canvas:active { cursor: grabbing; }
+.node-canvas:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.node-world { position: relative; transform-origin: 0 0; width: 0; height: 0; }
+
+.wire-layer { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.wire-layer .wire { fill: none; stroke-width: 2; pointer-events: stroke; cursor: pointer; }
+.wire-layer .wire.k-value { stroke: var(--accent); }
+.wire-layer .wire.k-cond { stroke: var(--purple); }
+.wire-layer .wire.selected { stroke: var(--ring); stroke-width: 3; }
+.wire-layer .wire.temp { stroke-dasharray: 5 4; opacity: .85; }
+
+.node {
+  position: absolute; width: 230px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow); font-size: var(--text-sm);
+}
+.node[data-type="exit"] { width: 300px; }
+.node[data-type="news"] { width: 290px; }
+.node[data-type="time"], .node[data-type="weekdays"] { width: 260px; }
+.node[data-type="all"], .node[data-type="any"], .node[data-type="not"] { width: 170px; }
+.node.selected { box-shadow: 0 0 0 2px var(--ring), var(--shadow-lg); }
+.node.loose { opacity: .6; border-style: dashed; }
+.node-head {
+  position: relative; display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+  padding: .6rem .8rem; border-bottom: 1px solid var(--line-soft); cursor: grab; font-weight: 580;
+}
+.node-head:active { cursor: grabbing; }
+.node-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-body { padding: .7rem .8rem; display: grid; gap: .6rem; }
+.node-row { position: relative; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; padding-left: .3rem; }
+.node-row .row-label { color: var(--muted); }
+.node-summary { color: var(--muted); margin: 0 0 .5rem; }
+
+.dot {
+  position: absolute; width: .7rem; height: .7rem; border-radius: 50%; top: 50%; transform: translateY(-50%);
+  border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--line); cursor: crosshair;
+}
+.dot[data-role="input"] { left: -.65rem; }
+.dot[data-role="output"] { right: -.65rem; }
+.dot[data-kind="value"] { background: var(--accent); }
+.dot[data-kind="cond"] { background: var(--purple); }
+.dot.can-drop { box-shadow: 0 0 0 4px color-mix(in srgb, var(--ring) 45%, transparent); }
+
+.node-drawer {
+  position: absolute; top: 0; right: 0; bottom: 0; width: min(22rem, 92%); overflow: auto; z-index: 5;
+  background: var(--surface); border-left: 1px solid var(--line); box-shadow: var(--shadow-lg); padding: 1rem;
+}
+.node-drawer-head { display: flex; justify-content: flex-end; }
+.node-drawer .section { border-top: 0; padding: 0; }

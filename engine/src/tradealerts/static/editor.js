@@ -4,35 +4,17 @@
 import { app, append, clear, h, isObj } from "./util.js";
 import { DAY_NAMES, FIELD_LABELS, indicatorMeta, isBlank, OP_WORDS } from "./describe.js";
 import { infoTip } from "./strategies.js";
+import { groupItems, groupKind, isNegatedLeaf } from "./nodegraph.js";
+export { groupKind, isNegatedLeaf }; // the rules tree moved to nodegraph.js; kept available here too
 
 // --------------------------------------------------------------------- rule builder: groups
 
-export function groupKind(c) {
-  if (!isObj(c)) return null;
-  if (Array.isArray(c.all)) return "all";
-  if (Array.isArray(c.any)) return "any";
-  if (isObj(c.not) && Array.isArray(c.not.any)) return "none";
-  if (isObj(c.not) && Array.isArray(c.not.all)) return "notall";
-  return null;
-}
-/** A single condition wrapped in {not: ...} (rules.py supports it; shown as a row with a "not" switch). */
-export function isNegatedLeaf(c) {
-  return isObj(c) && !groupKind(c) && isObj(c.not) && !groupKind(c.not) && Object.keys(c).length === 1;
-}
 /** The leaf itself, whether or not it is wrapped in {not: ...}. */
 function leafOf(c) { return isNegatedLeaf(c) ? c.not : c; }
 /** True for leaf shapes the builder has inputs for; anything else is kept as a read-only card. */
 export function editableLeaf(c) {
   const x = leafOf(c);
   return isObj(x) && Boolean("left" in x || x.time_between || x.weekdays || x.avoid_news);
-}
-export function groupItems(c) {
-  const k = groupKind(c);
-  if (k === "all") return c.all;
-  if (k === "any") return c.any;
-  if (k === "none") return c.not.any;
-  if (k === "notall") return c.not.all;
-  return [];
 }
 function makeGroup(kind, items) {
   if (kind === "all") return { all: items };
@@ -115,6 +97,50 @@ function moveButtons(pos, what) {
       onclick: () => pos.move(1) }, "▼"));
 }
 
+/** The inputs for a time window, weekdays or news-filter leaf (whichever ``get()`` holds). conditionRow calls
+    this for the list view; the node view calls it directly for a time, weekdays or news node. */
+export function leafFields(get, onChange) {
+  const c = get();
+  if (c.time_between) {
+    const t = (i) => timeInput(c.time_between[i], (v) => { get().time_between[i] = v; onChange(); }, i ? "End time" : "Start time");
+    return [h("span", { class: "word" }, "Bar starts between"), t(0), h("span", { class: "word" }, "and"), t(1),
+      tzInput(c.tz, (v) => { get().tz = v; onChange(); }, true)];
+  }
+  if (c.weekdays) {
+    const days = h("div", { class: "days", role: "group", "aria-label": "Days" });
+    DAY_NAMES.forEach((d) => {
+      const on = () => get().weekdays.map((x) => String(x).toLowerCase().slice(0, 3)).includes(d);
+      const b = h("button", { type: "button", "aria-pressed": String(on()),
+        onclick: () => {
+          const list = get().weekdays.map((x) => String(x).toLowerCase().slice(0, 3));
+          get().weekdays = on() ? list.filter((x) => x !== d) : DAY_NAMES.filter((x) => list.includes(x) || x === d);
+          b.setAttribute("aria-pressed", String(on())); onChange();
+        } }, d[0].toUpperCase() + d.slice(1));
+      days.appendChild(b);
+    });
+    return [h("span", { class: "word" }, "Only on"), days];
+  }
+  if (c.avoid_news) {
+    const n = c.avoid_news;
+    const cur = h("div", { class: "days", role: "group", "aria-label": "Currencies" });
+    for (const code of NEWS_CURRENCIES) {
+      const b = h("button", { type: "button", "aria-pressed": String((n.currencies || []).includes(code)), onclick: () => {
+        const list = get().avoid_news.currencies || [];
+        get().avoid_news.currencies = list.includes(code) ? list.filter((x) => x !== code) : [...list, code];
+        b.setAttribute("aria-pressed", String(get().avoid_news.currencies.includes(code))); onChange();
+      } }, code);
+      cur.appendChild(b);
+    }
+    return [h("span", { class: "word" }, "Not within"),
+      numberInput(n.before, (v) => { get().avoid_news.before = v; onChange(); }, { label: "Minutes before", step: "1", min: "0", integer: true, cls: "narrow" }),
+      h("span", { class: "word" }, "min before or"),
+      numberInput(n.after, (v) => { get().avoid_news.after = v; onChange(); }, { label: "Minutes after", step: "1", min: "0", integer: true, cls: "narrow" }),
+      h("span", { class: "word" }, "min after high-impact news for"), cur,
+      infoTip("Skips signals near scheduled high-impact news (like the US jobs report or interest rate decisions) for the currencies you pick. Settings, News calendar shows what's included.")];
+  }
+  return [];
+}
+
 function conditionRow(getRaw, setRaw, onChange, onRemove, pos = null) {
   const row = h("div", { class: "cond" });
   const body = h("div", { class: "body" });
@@ -144,40 +170,8 @@ function conditionRow(getRaw, setRaw, onChange, onRemove, pos = null) {
       op,
       operandEditor(() => get().right, (v) => { get().right = v; }, onChange, "Right side"),
     ]);
-  } else if (c.time_between) {
-    const t = (i) => timeInput(c.time_between[i], (v) => { get().time_between[i] = v; onChange(); }, i ? "End time" : "Start time");
-    append(body, [h("span", { class: "word" }, "Bar starts between"), t(0), h("span", { class: "word" }, "and"), t(1),
-      tzInput(c.tz, (v) => { get().tz = v; onChange(); }, true)]);
-  } else if (c.weekdays) {
-    const days = h("div", { class: "days", role: "group", "aria-label": "Days" });
-    DAY_NAMES.forEach((d) => {
-      const on = () => get().weekdays.map((x) => String(x).toLowerCase().slice(0, 3)).includes(d);
-      const b = h("button", { type: "button", "aria-pressed": String(on()),
-        onclick: () => {
-          const list = get().weekdays.map((x) => String(x).toLowerCase().slice(0, 3));
-          get().weekdays = on() ? list.filter((x) => x !== d) : DAY_NAMES.filter((x) => list.includes(x) || x === d);
-          b.setAttribute("aria-pressed", String(on())); onChange();
-        } }, d[0].toUpperCase() + d.slice(1));
-      days.appendChild(b);
-    });
-    append(body, [h("span", { class: "word" }, "Only on"), days]);
-  } else if (c.avoid_news) {
-    const n = c.avoid_news;
-    const cur = h("div", { class: "days", role: "group", "aria-label": "Currencies" });
-    for (const code of NEWS_CURRENCIES) {
-      const b = h("button", { type: "button", "aria-pressed": String((n.currencies || []).includes(code)), onclick: () => {
-        const list = get().avoid_news.currencies || [];
-        get().avoid_news.currencies = list.includes(code) ? list.filter((x) => x !== code) : [...list, code];
-        b.setAttribute("aria-pressed", String(get().avoid_news.currencies.includes(code))); onChange();
-      } }, code);
-      cur.appendChild(b);
-    }
-    append(body, [h("span", { class: "word" }, "Not within"),
-      numberInput(n.before, (v) => { get().avoid_news.before = v; onChange(); }, { label: "Minutes before", step: "1", min: "0", integer: true, cls: "narrow" }),
-      h("span", { class: "word" }, "min before or"),
-      numberInput(n.after, (v) => { get().avoid_news.after = v; onChange(); }, { label: "Minutes after", step: "1", min: "0", integer: true, cls: "narrow" }),
-      h("span", { class: "word" }, "min after high-impact news for"), cur,
-      infoTip("Skips signals near scheduled high-impact news (like the US jobs report or interest rate decisions) for the currencies you pick. Settings, News calendar shows what's included.")]);
+  } else {
+    append(body, leafFields(get, onChange));
   }
   append(row, [body, moveButtons(pos, "condition"), h("button", { class: "quiet icon remove", type: "button",
     "aria-label": "Remove condition", title: "Remove", onclick: onRemove }, "✕")]);
