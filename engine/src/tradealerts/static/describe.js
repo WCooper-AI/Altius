@@ -3,7 +3,7 @@
 
 import { $main, app, append, ask, clear, clone, CURRENCY, h, isObj, money, nf, num, POST, short, showCopy, toast,
   when } from "./util.js";
-import { groupItems, groupKind, isNegatedLeaf } from "./editor.js";
+import { groupItems, groupKind, isNegatedLeaf } from "./nodegraph.js";
 import { confirmLive } from "./strategies.js";
 import { refreshStatus } from "./boot.js";
 

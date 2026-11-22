@@ -3,7 +3,8 @@
 
 import { append, clear, day, GET, h, isObj, money, num, POST, short, signed, stageTag, svg, toast, when } from "./util.js";
 import { describeCondition, indicatorMeta, isBlank, renderParts } from "./describe.js";
-import { groupItems, groupKind, numberInput, PARAM_LABELS } from "./editor.js";
+import { numberInput, PARAM_LABELS } from "./editor.js";
+import { groupItems, groupKind } from "./nodegraph.js";
 import { infoTip, STOP_KINDS, TARGET_KINDS } from "./strategies.js";
 import { isHosted } from "./settings.js";
 import { candleChart, expandable } from "./widgets.js";
