@@ -15,7 +15,7 @@ dependencies = [
     "PyYAML>=6.0",
     "fastapi>=0.110",
     "uvicorn>=0.27",
-    "dukascopy-python>=4.0,<5",  # 5.0.0 fails to import on Python < 3.14
+    "dukascopy-python>=4.0,<8",  # 5.0.0 fails to import on Python < 3.14
 ]
 
 [project.optional-dependencies]
