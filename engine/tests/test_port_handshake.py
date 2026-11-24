@@ -40,7 +40,7 @@ def test_serve_prints_handshake_and_answers(tmp_path):
     proc = subprocess.Popen(
         [sys.executable, "-m", "tradealerts", "--config", str(tmp_path / "config.yaml"),
          "serve", "--port", "0", "--no-runner", "--no-auth"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, cwd=tmp_path)
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", cwd=tmp_path)
     try:
         line = proc.stdout.readline().strip()
         assert line.startswith("TRADEALERTS_PORT=")

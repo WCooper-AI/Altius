@@ -298,7 +298,7 @@ def test_robustness_summary_shows_only_the_parts_with_data(bars, optimised, tmp_
     data = tmp_path / "data.json"
     data.write_text(json.dumps(clean({"backtest": bt, "luck": luck, "optimise": {"res": optimised, "axes": axes}})))
     out = subprocess.run(["node", "--input-type=module", "-e", FAKE_DOM, "--", str(STATIC), str(STUB), str(data)],
-                         capture_output=True, text=True, timeout=60)
+                         capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
     assert got["none"] is None

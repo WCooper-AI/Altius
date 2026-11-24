@@ -22,9 +22,11 @@ from pathlib import Path
 from typing import Callable
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__
 from ..workspace import Workspace
@@ -94,6 +96,13 @@ def build_app(ctx: AppContext, *, authorize: Callable[[Request], Response | None
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request: Request, exc: RequestValidationError):
         return JSONResponse({"detail": plain_errors(exc.errors())}, 422)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request: Request, exc: StarletteHTTPException):
+        # Python 3.11 and Windows can't parse very deep JSON at all; answer like the strategy check does.
+        if exc.status_code == 400 and isinstance(exc.__cause__, RecursionError):
+            return JSONResponse({"detail": "Rules are nested too deeply."}, 422)
+        return await http_exception_handler(request, exc)
 
     @app.middleware("http")
     async def guard(request: Request, call_next):

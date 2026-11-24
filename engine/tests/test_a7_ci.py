@@ -48,5 +48,5 @@ def test_coverage_has_a_floor():
 @pytest.mark.skipif(shutil.which("node") is None or not (ROOT / "node_modules" / "eslint").is_dir(),
                     reason="needs node and `npm ci` at the repo root")
 def test_interface_javascript_lints_clean():
-    out = subprocess.run([shutil.which("npm"), "run", "-s", "lint:js"], cwd=ROOT, capture_output=True, text=True)
+    out = subprocess.run([shutil.which("npm"), "run", "-s", "lint:js"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
     assert out.returncode == 0, out.stdout + out.stderr

@@ -1,6 +1,7 @@
 """Fixes from the security-break-the-app follow-up (R3-1 and Nit):
 Non-finite numbers in rules, deeply nested rule trees, and inf/nan in backtest responses."""
 
+import json
 import math
 
 import pytest
@@ -146,15 +147,20 @@ def test_deeply_nested_rule_error_has_no_recursion_text():
 def test_deeply_nested_rules_rejected_on_backtest(client):
     """A strategy with a deeply nested rule is rejected on backtest (422, plain message)."""
     # Create a simple strategy and add deep nesting directly (avoid deepcopy which also hits recursion limit)
+    # The JSON is built as text: json.dumps of a 2000-deep tree hits the recursion limit on
+    # Python 3.11 and on Windows (smaller C stack), which broke this test there, not the app.
     strategy = {
         "name": "Test",
         "market": {"symbol": "data/bars.csv", "label": "Sample", "provider": "csv", "timeframe": "1h"},
         "direction": "long",
-        "entry": deep_nested_rule(2000),
+        "entry": "__ENTRY__",
         "exit": {"stop": {"atr": 2, "atr_period": 14}, "target": {"r_multiple": 2}, "max_bars": 24},
         "risk": {"account_size": 1000, "risk_per_trade_pct": 0.5, "currency": "GBP"},
     }
-    r = client.post("/api/backtest", json={"data": strategy}, headers=H)
+    depth = 2000
+    entry = '{"all": [' * depth + '{"left": "close", "op": ">", "right": 100}' + ']}' * depth
+    body = json.dumps({"data": strategy}).replace('"__ENTRY__"', entry)
+    r = client.post("/api/backtest", content=body, headers={**H, "Content-Type": "application/json"})
     assert r.status_code == 422
     detail = r.json()["detail"]
     assert "nested too deeply" in detail or "nested" in detail

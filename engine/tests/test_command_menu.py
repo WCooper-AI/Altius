@@ -16,7 +16,7 @@ def score(tmp_path, pairs):
     mod.write_text((STATIC / "cmdk.js").read_text(encoding="utf-8"), encoding="utf-8")
     script = f"import {{ commandScore }} from {json.dumps(mod.as_uri())};" \
              f"console.log(JSON.stringify({json.dumps(pairs)}.map(([v, s, k]) => commandScore(v, s, k))));"
-    out = subprocess.run([NODE, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30, check=True)
+    out = subprocess.run([NODE, "--input-type=module", "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
     return json.loads(out.stdout)
 
 
