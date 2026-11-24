@@ -235,7 +235,7 @@ class CSVProvider(Provider):
         cols = {c.lower().strip(): c for c in raw.columns}
         time_col = next((cols[c] for c in self.TIME_COLUMNS if c in cols), None)
         if time_col is None:
-            raise DataError(f"{p} needs a time column named one of: {', '.join(self.TIME_COLUMNS)}")
+            raise DataError(f"{p.name} needs a time column named one of: {', '.join(self.TIME_COLUMNS)}")
         t = raw[time_col]
         try:
             if pd.api.types.is_numeric_dtype(t):

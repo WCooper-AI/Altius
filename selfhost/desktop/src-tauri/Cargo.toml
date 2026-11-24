@@ -1,6 +1,6 @@
 [package]
 name = "trading-alerts"
-version = "0.3.3"
+version = "0.4.0"
 description = "Trading Alerts desktop app"
 edition = "2021"
 publish = false

@@ -18,7 +18,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 
-from ... import __version__, keychain
+from ... import __version__, keychain, safeyaml
 from ...config import PATH_KEYS, ConfigError, load_config, uses_env
 from ...state import StateStore
 from ...strategy import strategy_files
@@ -78,14 +78,14 @@ def make_backup(ws: Workspace, redact: bool = False) -> bytes:
         if ws.config_path.exists():
             if redact:
                 try:
-                    raw = yaml.safe_load(ws.config_path.read_text(encoding="utf-8")) or {}
+                    raw = safeyaml.load(ws.config_path.read_text(encoding="utf-8")) or {}
                 except yaml.YAMLError:
                     raw = {}  # never fall back to copying a file we couldn't clean
-                z.writestr("config.yaml", REDACTED_NOTE + yaml.safe_dump(redact_config(raw), sort_keys=False,
+                z.writestr("config.yaml", REDACTED_NOTE + safeyaml.dump(redact_config(raw), sort_keys=False,
                                                                          allow_unicode=True))
             elif ws.trusted and keychain.placeholders(raw := ws.raw_config()):
                 # the secrets themselves, so the backup restores on another computer
-                z.writestr("config.yaml", CONFIG_HEADER + yaml.safe_dump(keychain.reveal(raw), sort_keys=False,
+                z.writestr("config.yaml", CONFIG_HEADER + safeyaml.dump(keychain.reveal(raw), sort_keys=False,
                                                                          allow_unicode=True))
             else:
                 z.write(ws.config_path, "config.yaml")
@@ -159,7 +159,7 @@ def _member(z: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
 
 def _yaml_dict(name: str, b: bytes) -> dict:
     try:
-        data = yaml.safe_load(b.decode("utf-8"))
+        data = safeyaml.load(b.decode("utf-8"))
     except (yaml.YAMLError, UnicodeDecodeError):
         err(422, f"{name} in the backup is damaged")
     if data is None and name == "config.yaml":
@@ -176,7 +176,7 @@ def _check_settings(ws: Workspace, settings: dict) -> None:
     fd, name = tempfile.mkstemp(prefix=".restore-check-", suffix=".yaml", dir=folder)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.safe_dump(settings, f, sort_keys=False, allow_unicode=True)
+            safeyaml.dump(settings, f, sort_keys=False, allow_unicode=True)
         load_config(name, must_exist=True, trusted=ws.trusted, cache_dir=ws.cache_dir,
                     min_poll_minutes=ws.limits.min_poll_minutes)
     except ConfigError as exc:

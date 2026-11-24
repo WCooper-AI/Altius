@@ -1,7 +1,15 @@
-# Unreleased
+# Changes in 0.4.0
 
 User-visible and behaviour changes from the project's own code, quantitative and security
-audits and their follow-up sessions, not yet given a version number.
+audits and their follow-up sessions.
+
+## New look and strategy node view
+
+- A refreshed interface: a cleaner card-and-panel look, a top bar whose highlight slides to
+  the current page, and a command menu (Ctrl+K) that finds pages, strategies and settings and
+  jumps straight to the chosen setting.
+- Strategies can be edited as a list or as **nodes**: a canvas of rule blocks joined by wires,
+  with drag, pan and zoom. Both views edit the same strategy.
 
 ## Changes to existing backtest results
 
@@ -71,6 +79,16 @@ audits and their follow-up sessions, not yet given a version number.
   redirect to a different host, closing a redirect-based bypass of its address checks.
 - `config.yaml`, the session secret and restore safety copies are written owner-only; CI now
   runs `pip-audit` and gitleaks on every push and weekly.
+- Fixes from a "break the app" test of the running app:
+  - Strategy and settings YAML that uses aliases (`&name` / `*name`) is refused, so a small
+    file can no longer expand into a huge one; very deeply nested YAML gets a plain error.
+  - Requests larger than 2 MB are refused (file uploads and backup restores keep their own
+    limits).
+  - A failed CSV upload names the file, not the folder it was stored in on the server.
+  - Infinite or not-a-number values in rules (e.g. `1e400`) are refused when the strategy is
+    checked, and backtest results can no longer fail to send because of one.
+  - Test dates before 1900 or after 2200 get a plain error instead of a server error, and
+    rules nested too deeply say so in plain words.
 
 ## Documentation and evidence
 

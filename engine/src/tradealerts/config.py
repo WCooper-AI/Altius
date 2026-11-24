@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from . import keychain
+from . import keychain, safeyaml
 
 _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
@@ -87,7 +87,7 @@ def read_raw(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = safeyaml.load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         raise ConfigError(f"{path}: invalid YAML: {exc}") from None
     if not isinstance(data, dict):

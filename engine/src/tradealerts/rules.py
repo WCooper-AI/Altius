@@ -22,6 +22,7 @@ Operands
 
 from __future__ import annotations
 
+import math
 from typing import Any, Callable
 
 import numpy as np
@@ -67,6 +68,8 @@ def compile_operand(spec: Any, path: str = "operand") -> Callable[[Context], Ser
         raise RuleError("true/false isn't a valid operand", path)
     if isinstance(spec, (int, float)):
         value = float(spec)
+        if not math.isfinite(value):
+            raise RuleError("must be a normal number", path)
         return lambda ctx: value
     if isinstance(spec, str):
         if spec not in indicators.PRICE_FIELDS:
@@ -88,6 +91,8 @@ def compile_operand(spec: Any, path: str = "operand") -> Callable[[Context], Ser
     for name, v in (("scale", scale), ("add", add)):
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             raise RuleError(f"{name} must be a number", path)
+        if not math.isfinite(v):
+            raise RuleError(f"{name} must be a normal number", path)
 
     if "field" in spec:
         field = spec.pop("field")
@@ -317,7 +322,10 @@ def max_lookback(spec: Any) -> int:
 
 def evaluate(spec_or_evaluator, df: pd.DataFrame, ctx: Context | None = None) -> Series:
     """True where the condition holds. Unknown (e.g. indicators still warming up) counts as false."""
-    fn = spec_or_evaluator if callable(spec_or_evaluator) else compile_condition(spec_or_evaluator)
+    try:
+        fn = spec_or_evaluator if callable(spec_or_evaluator) else compile_condition(spec_or_evaluator)
+    except RecursionError:
+        raise RuleError("Rules are nested too deeply.") from None
     ctx = ctx or Context(df)
     out = _tri(fn(ctx)).reindex(df.index)
     return out.fillna(False).astype(bool)

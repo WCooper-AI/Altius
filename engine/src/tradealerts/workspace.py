@@ -13,8 +13,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
-
+from . import safeyaml
 from .config import AppConfig, ConfigError, load_config, read_raw
 from .state import StateStore
 
@@ -85,7 +84,7 @@ class Workspace:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.config_path.with_name(self.config_path.name + ".tmp")
         # Owner-only: without a password store, alert tokens and passwords are in this file.
-        write_private(tmp, (CONFIG_HEADER + yaml.safe_dump(new, sort_keys=False, allow_unicode=True)).encode("utf-8"))
+        write_private(tmp, (CONFIG_HEADER + safeyaml.dump(new, sort_keys=False, allow_unicode=True)).encode("utf-8"))
         tmp.replace(self.config_path)
 
     def ensure(self) -> None:
