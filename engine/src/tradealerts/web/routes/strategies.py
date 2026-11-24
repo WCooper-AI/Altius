@@ -11,7 +11,7 @@ import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import Response
 
-from ... import indicators, instruments, rules, stages
+from ... import indicators, instruments, rules, safeyaml, stages
 from ...recipes import (MARKETS, RECIPES, RecipeError, build_strategy, example_settings, preview_strategy,
                         still_matches_recipe)
 from ...strategy import (ID_RE, StrategyError, dump_strategy, load_strategy, read_raw, strategy_files,
@@ -72,7 +72,7 @@ def examples():
     out = []
     for f in sorted((TEMPLATES / "strategies").iterdir(), key=lambda f: f.name):
         if f.name.endswith(".yaml"):
-            d = yaml.safe_load(f.read_text(encoding="utf-8"))
+            d = safeyaml.load(f.read_text(encoding="utf-8"))
             out.append({"file": f.name[:-5], "name": d.get("name"), "description": d.get("description", "")})
     return out
 
@@ -84,7 +84,7 @@ def example(name: str):
     f = TEMPLATES / "strategies" / f"{name}.yaml"
     if not f.is_file():
         err(404, "No example with that name")
-    return yaml.safe_load(f.read_text(encoding="utf-8"))
+    return safeyaml.load(f.read_text(encoding="utf-8"))
 
 
 @router.get("/api/recipes")
@@ -236,7 +236,7 @@ def from_yaml(body: dict = Body(...), ws: Workspace = Depends(workspace)):
     if not isinstance(text, str) or len(text) > 200_000:
         return {"ok": False, "error": "Nothing to read", "data": None}
     try:
-        data = yaml.safe_load(text)
+        data = safeyaml.load(text)
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         where = f" (line {mark.line + 1})" if mark else ""
@@ -281,7 +281,7 @@ def import_strategy(body: dict = Body(...), ws: Workspace = Depends(workspace)):
         if len(body["yaml"]) > 200_000:
             err(422, "That file is too big to be a strategy")
         try:
-            data = yaml.safe_load(body["yaml"])
+            data = safeyaml.load(body["yaml"])
         except yaml.YAMLError:
             err(422, "That file isn't a Trading Alerts strategy (it isn't valid YAML)")
     else:

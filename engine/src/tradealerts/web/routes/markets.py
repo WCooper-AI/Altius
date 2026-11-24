@@ -232,14 +232,17 @@ async def upload_csv(name: str, request: Request, ws: Workspace = Depends(worksp
     folder.mkdir(parents=True, exist_ok=True)
     tmp = folder / f".{name}.{os.getpid()}.part"
     tmp.write_bytes(bytes(raw))
+    def why(exc: Exception) -> str:  # name the file they sent, not where it sits on the server
+        return str(exc).replace(str(tmp), name).replace(str(folder), "").replace(tmp.name, name)
+
     try:
         df = data_mod.CSVProvider(base_dir=folder, allowed_root=folder).load(tmp.name)
     except (data_mod.DataError, ValueError, KeyError, UnicodeDecodeError) as exc:
         tmp.unlink(missing_ok=True)
-        err(422, f"That file can't be read as candles: {exc}")
+        err(422, f"That file can't be read as candles: {why(exc)}")
     except Exception as exc:
         tmp.unlink(missing_ok=True)
-        err(422, f"That file can't be read: {exc}")
+        err(422, f"That file can't be read: {why(exc)}")
     if df.empty:
         tmp.unlink(missing_ok=True)
         err(422, "That file has no candles in it")

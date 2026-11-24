@@ -44,7 +44,11 @@ def validate(ws: Workspace, data: Any, sid: str = "draft") -> Strategy:
         if not (ws.config().csv_root / name).is_file():
             err(422, f"There's no uploaded file called {name}. Upload it under Markets, My CSV files.")
     try:
-        s = strategy_from_dict(copy.deepcopy(data), sid=sid)
+        try:
+            data_copy = copy.deepcopy(data)
+        except RecursionError:
+            err(422, "Rules are nested too deeply.")
+        s = strategy_from_dict(data_copy, sid=sid)
         check_runtime(s)
     except StrategyError as exc:
         err(422, str(exc))

@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from . import indicators, rules, timeframes
+from . import indicators, rules, safeyaml, timeframes
 
 CURRENCY_SYMBOLS = {"GBP": "£", "USD": "$", "EUR": "€"}
 
@@ -493,6 +493,8 @@ def strategy_from_dict(data: dict, sid: str = "", path: Path | None = None, raw_
             source_hash=hashlib.sha256(raw_text.encode()).hexdigest()[:12] if raw_text else "",
             path=path,
         )
+    except RecursionError:
+        raise StrategyError("Rules are nested too deeply.") from None
     except rules.RuleError as exc:
         raise StrategyError(str(exc)) from None
 
@@ -501,7 +503,7 @@ def load_strategy(path: str | Path) -> Strategy:
     p = Path(path)
     text = p.read_text(encoding="utf-8")
     try:
-        data = yaml.safe_load(text)
+        data = safeyaml.load(text)
     except yaml.YAMLError as exc:
         raise StrategyError(f"{p.name}: invalid YAML: {exc}") from None
     try:
@@ -549,14 +551,14 @@ def strategy_files(directory: str | Path) -> dict[str, Path]:
 
 
 def read_raw(path: str | Path) -> dict:
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    data = safeyaml.load(Path(path).read_text(encoding="utf-8"))
     return data if isinstance(data, dict) else {}
 
 
 def dump_strategy(data: dict) -> str:
     ordered = {k: data[k] for k in KEY_ORDER if k in data}
     ordered.update({k: v for k, v in data.items() if k not in ordered})
-    return FILE_HEADER + yaml.safe_dump(ordered, sort_keys=False, allow_unicode=True, width=100)
+    return FILE_HEADER + safeyaml.dump(ordered, sort_keys=False, allow_unicode=True, width=100)
 
 
 def upgrade_legacy_market(data: dict) -> bool:

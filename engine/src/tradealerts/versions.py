@@ -14,6 +14,8 @@ from pathlib import Path
 
 import yaml
 
+from . import safeyaml
+
 # The parts of a strategy that change what it trades. Name, description and alerts on/off don't.
 RULE_KEYS = ("market", "direction", "entry", "exit", "risk", "costs")
 
@@ -55,7 +57,7 @@ def rules_changed(old: dict | None, new: dict | None) -> bool:
 
 def parse(text: str) -> dict:
     try:
-        data = yaml.safe_load(text or "")
+        data = safeyaml.load(text or "")
     except yaml.YAMLError:
         return {}
     return data if isinstance(data, dict) else {}

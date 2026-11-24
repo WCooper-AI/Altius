@@ -10,6 +10,9 @@ from ..backtest import lookback_for_start
 from ..workspace import Workspace
 from .common import err
 
+MIN_DATE = pd.Timestamp("1900-01-01", tz="UTC")
+MAX_DATE = pd.Timestamp("2201-01-01", tz="UTC")
+
 
 def load_period(ctx, ws: Workspace, s, body: dict, end_at: pd.Timestamp | None = None, warmup: int | None = None):
     """Prices for a test: (candles, finer candles, test start, notes). Uses the request's
@@ -33,6 +36,10 @@ def load_period(ctx, ws: Workspace, s, body: dict, end_at: pd.Timestamp | None =
             end = pd.Timestamp(str(body["end"]), tz="UTC") + pd.Timedelta(days=1)
     except ValueError:
         err(422, "Dates must look like 2025-01-31")
+    for t in (test_start, end):
+        # Far-off dates parse, but break the nanosecond maths in the backtest later on
+        if t is not None and not MIN_DATE <= t <= MAX_DATE:
+            err(422, "Dates must be between 1900 and 2200")
     if end_at is not None:
         end = end_at if end is None else min(end, end_at)
     if test_start is not None and end is not None and test_start >= end:

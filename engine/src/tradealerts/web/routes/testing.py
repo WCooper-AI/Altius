@@ -60,7 +60,7 @@ def backtest(request: Request, body: dict = Body(...), ws: Workspace = Depends(w
                None if split is None else float(split))
     out["meta"] = stamp(ws, s, body, out["metrics"], out)
     record_test(ws, body, *stages.test_kinds(body))
-    return out
+    return clean(out)
 
 
 @router.post("/api/signals/count")

@@ -40,6 +40,10 @@ log = logging.getLogger(__name__)
 STATIC = resources.files("tradealerts") / "static"
 CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
        "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+# Largest request body for everything except the two routes that read theirs in chunks and stop at
+# their own limits (CSV uploads, backup restore). Strategy and settings bodies are a few KB.
+MAX_BODY = 2 * 1024 * 1024
+STREAMED = ("/api/uploads/", "/api/restore")
 # The interface is ES modules with no build step: the page loads boot.js, which imports the rest.
 ENTRY = "boot.js"
 # Windows can map .js to text/plain in its registry; browsers refuse modules served that way.
@@ -99,6 +103,12 @@ def build_app(ctx: AppContext, *, authorize: Callable[[Request], Response | None
             request.scope["path"], request.scope["raw_path"] = path, path.encode()
         if allowed_hosts is not None and request.headers.get("host", "") not in allowed_hosts:
             return JSONResponse({"detail": "Unknown host"}, 421)
+        if request.method not in ("GET", "HEAD") and not path.startswith(STREAMED):
+            length = request.headers.get("content-length")
+            if length is None and "chunked" in request.headers.get("transfer-encoding", "").lower():
+                return JSONResponse({"detail": "Send the request with a Content-Length header"}, 411)
+            if length is not None and (not length.isdigit() or int(length) > MAX_BODY):
+                return JSONResponse({"detail": "That request is too big"}, 413)
         if path.startswith("/api/"):
             if (request.method not in ("GET", "HEAD") and path not in csrf_exempt
                     and request.headers.get("x-requested-with") != "tradealerts"):
