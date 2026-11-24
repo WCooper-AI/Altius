@@ -102,7 +102,7 @@ def test_editor_js_handles_negated_leaves():
     out = subprocess.run(["node", "--input-type=module", "-e", JS_CHECK, "--", str(STATIC),
                           str(Path(__file__).parent / "js" / "browser_stub.mjs"),
                           json.dumps([NEGATED_LEAF, CUSTOM_NODE, {"not": {"any": []}}])],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, encoding="utf-8")
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
     assert got["negKind"] is None and got["negLeaf"] is True and got["negEditable"] is True

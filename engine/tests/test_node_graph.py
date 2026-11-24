@@ -22,7 +22,7 @@ def run(tmp_path, body):
     out = subprocess.run(
         [NODE, "--input-type=module", "-e", script],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8",
         timeout=30,
         check=True,
     )

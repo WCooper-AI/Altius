@@ -72,7 +72,7 @@ def test_modules_load_in_any_order(entry):
               "await import(pathToFileURL(dir + '/' + entry).href);\n"
               "console.log('ok'); process.exit(0);\n")
     out = subprocess.run(["node", "--input-type=module", "-e", script, "--", str(STATIC), str(STUB), entry],
-                         capture_output=True, text=True, timeout=60)
+                         capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert out.returncode == 0 and out.stdout.strip() == "ok", out.stderr
 
 

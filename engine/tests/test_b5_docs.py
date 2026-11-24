@@ -120,7 +120,7 @@ def _doc_pages() -> list[Path]:
     when git isn't available (e.g. an unpacked release)."""
     pages = sorted(DOCS.glob("*.md"))
     try:
-        out = subprocess.run(["git", "ls-files", "docs"], cwd=ROOT, capture_output=True, text=True, check=True)
+        out = subprocess.run(["git", "ls-files", "docs"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True)
     except (OSError, subprocess.CalledProcessError):
         return pages
     tracked = {Path(line).name for line in out.stdout.splitlines()}
